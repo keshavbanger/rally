@@ -98,6 +98,7 @@ class RallyGroupService implements GroupService {
   // RECONNECTING/ERROR instead of a hardcoded "Connected" label.
   private connectionStatus: ConnectionStatus = 'DISCONNECTED';
   private connectionListeners = new Set<(status: ConnectionStatus) => void>();
+  private messageListeners = new Set<(message: ServerMessage) => void>();
 
   // ---- GroupService interface --------------------------------------
 
@@ -133,7 +134,16 @@ class RallyGroupService implements GroupService {
   }
 
   leaveGroup(): void {
+    if (this.apiGroup) {
+      groupsApi.leaveGroup(this.apiGroup.id).catch(console.error);
+    }
     void this.teardown();
+  }
+
+  async removeMember(memberId: string): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.removeMember(this.apiGroup.id, memberId);
+    await this.refresh();
   }
 
   async sendSOS(): Promise<void> {
@@ -160,6 +170,48 @@ class RallyGroupService implements GroupService {
    * code that can handle the error. */
   resolveAlert(alertId: string): void {
     void this.resolveAlertAsync(alertId).catch((err) => console.error('Failed to resolve alert', err));
+  }
+
+  markAlertAsRead(alertId: string): void {
+    void alertsApi.acknowledgeAlert(alertId).catch((err) => console.error('Failed to acknowledge alert', err));
+  }
+
+  markAllAlertsAsRead(): void {
+    for (const a of this.activeAlerts) {
+      void alertsApi.acknowledgeAlert(a.id).catch(() => {});
+    }
+  }
+
+  startTrip(): void {
+    if (!this.apiTrip) return;
+    void tripsApi.startTrip(this.apiTrip.id).then(() => this.refresh()).catch(console.error);
+  }
+
+  setTripRoute(destination: string, destLat: number, destLng: number, route: { lat: number; lng: number }[], distanceMeters: number, durationSeconds: number): void {
+    if (!this.group) return;
+    this.group = {
+      ...this.group,
+      destination,
+      destinationLat: destLat,
+      destinationLng: destLng,
+      route: route.map((p) => ({ lat: p.lat, lng: p.lng })),
+      trip: {
+        ...this.group.trip,
+        distanceKm: Math.round((distanceMeters / 1000) * 10) / 10,
+        durationMin: Math.round(durationSeconds / 60),
+      },
+    };
+    this.emit();
+  }
+
+  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void {
+    this.sendLocationUpdate({
+      latitude: lat,
+      longitude: lng,
+      accuracy: null,
+      speed,
+      heading,
+    });
   }
 
   /** No backend equivalent — Phase 4-12's trip state machine has no
@@ -280,6 +332,9 @@ class RallyGroupService implements GroupService {
   }
 
   private handleSocketMessage(message: ServerMessage): void {
+    // Forward to useRealtime subscribers first, before internal processing,
+    // so UI can react to the raw message while the service updates state.
+    this.messageListeners.forEach((listener) => listener(message));
     switch (message.type) {
       case 'trip_state':
         for (const member of message.data.members) this.livePositions.set(member.user_id, member);
@@ -561,10 +616,20 @@ class RallyGroupService implements GroupService {
     listener(this.connectionStatus);
     return () => this.connectionListeners.delete(listener);
   }
+
+  /** Subscribe to raw incoming WebSocket messages. Fires AFTER the service
+   * has already processed each message internally (position/presence/alert
+   * updates), so listeners can react to specific types (e.g. flash an SOS
+   * banner) without re-implementing the service's own logic. */
+  subscribeMessages(listener: (message: ServerMessage) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  }
 }
 
 const rallyGroupServiceInstance = new RallyGroupService();
-export const rallyGroupService: GroupService = rallyGroupServiceInstance;
+export const rallyGroupService: RallyGroupService = rallyGroupServiceInstance;
+export type { RallyGroupService };
 /** Escape hatch for the one capability (sending GPS) that isn't part of
  * the shared GroupService interface the mock implementation also
  * satisfies — see lib/geo/useTripLocationSharing.ts. */

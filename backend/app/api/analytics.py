@@ -89,7 +89,7 @@ def get_trip_timeline_endpoint(
 def get_trip_replay_endpoint(
     trip: Trip = Depends(require_trip_member),
     db: Session = Depends(get_db),
-    interval_seconds: int = Query(
+    interval_seconds: float = Query(
         settings.REPLAY_DEFAULT_INTERVAL_SECONDS,
         ge=settings.REPLAY_MIN_INTERVAL_SECONDS,
         le=settings.REPLAY_MAX_INTERVAL_SECONDS,

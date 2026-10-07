@@ -41,16 +41,12 @@ def decode_supabase_jwt(token: str) -> dict:
         decode_kwargs["issuer"] = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
 
     try:
-        import jwt as pyjwt
-        header = pyjwt.get_unverified_header(token)
-        logger.info(f"JWT Header: {header}")
-        
         payload = jwt.decode(
             token,
             settings.JWT_SECRET,
-            algorithms=["HS256", "RS256"],
+            algorithms=[settings.JWT_ALGORITHM],
             audience="authenticated",
-            options={"verify_signature": False, "verify_iss": False, "verify_aud": False},
+            **decode_kwargs,
         )
     except PyJWTError as exc:
         logger.info("JWT verification failed: %s - %s", exc.__class__.__name__, str(exc))

@@ -65,6 +65,11 @@ def get_current_profile(
     )
 
 
-def get_current_user_id(profile: Profile = Depends(get_current_profile)) -> str:
-    """Thin wrapper for endpoints that only need the id, ensuring the profile exists first."""
-    return str(profile.id)
+def get_current_user_id(user: AuthenticatedUser = Depends(get_current_user)) -> str:
+    """Thin wrapper for endpoints that only need the authenticated user's id.
+
+    Derives directly from get_current_user (JWT verification only) — does NOT
+    hit the database.  Endpoints that also need the full profile row should
+    depend on get_current_profile explicitly.
+    """
+    return str(user.id)

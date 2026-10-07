@@ -47,9 +47,9 @@ export default function TripDetailsPage() {
     );
   }
 
-  const h = Math.floor(trip.durationMin / 60);
-  const m = trip.durationMin % 60;
-  const durationStr = h > 0 ? `${h}h ${m}m` : `${m} min`;
+  const durationStr = trip.durationMin != null
+    ? (() => { const h = Math.floor(trip.durationMin! / 60); const m = trip.durationMin! % 60; return h > 0 ? `${h}h ${m}m` : `${m} min`; })()
+    : 'N/A';
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

@@ -15,12 +15,18 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    if not settings.DATABASE_URL:
+    # Prefer the direct (session-mode) connection: Supabase's pgBouncer
+    # transaction pooler (DATABASE_URL) does not support the prepared
+    # statements that Alembic emits, causing "prepared statement already
+    # exists" errors on the first migration run.
+    url = settings.DIRECT_DATABASE_URL or settings.DATABASE_URL
+    if not url:
         raise RuntimeError(
-            "DATABASE_URL is not set. Copy backend/.env.example to backend/.env "
-            "and fill in your Supabase connection string before running migrations."
+            "Neither DIRECT_DATABASE_URL nor DATABASE_URL is set. "
+            "Copy backend/.env.example to backend/.env and fill in your "
+            "Supabase connection strings before running migrations."
         )
-    return settings.DATABASE_URL
+    return url
 
 
 def run_migrations_offline() -> None:
