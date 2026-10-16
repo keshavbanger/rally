@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Minus, Plus, Copy, Check, ArrowRight, Users } from 'lucide-react';
-import { groupService, buildPreviewGroup } from '@/lib/mock/groupService';
+import { buildPreviewGroup } from '@/lib/mock/groupService';
+import { createGroup as apiCreateGroup } from '@/lib/api/groups';
 import LiveMap from '@/components/map/LiveMap';
 
 const DESTINATIONS = ['Solang Valley', 'Rohtang Pass', 'Kasol', 'Manali', 'Leh Ladakh', 'Spiti Valley'];
@@ -29,8 +30,12 @@ export default function CreateGroupPage() {
     
     setSubmitting(true);
     try {
-      const group = await groupService.createGroup({ name: name.trim(), destination: destination.trim(), maxMembers });
-      setJoinCode(group.joinCode);
+      // Uses lib/api/groups.ts → apiRequest → POST /api/v1/groups
+      const group = await apiCreateGroup({
+        name: name.trim(),
+        destination_name: destination.trim(),
+      });
+      setJoinCode(group.join_code);
     } catch (err: any) {
       console.error('Failed to create group:', err);
       alert(err.message || 'Failed to create group. Please check your connection and try again.');
