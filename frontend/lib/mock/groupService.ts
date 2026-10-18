@@ -17,8 +17,8 @@ export interface GroupService {
   pauseTrip(): void;
   resumeTrip(): void;
   endTrip(): Promise<TripSummary>;
-  setTripRoute(destination: string, destLat: number, destLng: number, route: {lat: number, lng: number}[], distanceMeters: number, durationSeconds: number): void;
-  startTrip(): void;
+  setTripRoute(destination: string, destLat: number, destLng: number, route: {lat: number, lng: number}[], distanceMeters: number, durationSeconds: number): void | Promise<void>;
+  startTrip(): void | Promise<void>;
   subscribe(listener: (group: Group | null) => void): () => void;
   updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void;
 }
@@ -63,10 +63,11 @@ class RestGroupService implements GroupService {
     const [groupData, membersData, tripsData] = await Promise.all([
       fetchApi(`/groups/${groupId}`),
       fetchApi(`/groups/${groupId}/members`),
-      fetchApi(`/groups/${groupId}/trips`).catch(() => []),
+      fetchApi(`/groups/${groupId}/trips`).catch(() => ({ items: [] })),
     ]);
 
-    const activeTrip = tripsData.find((t: any) => t.status === 'ACTIVE');
+    const tripList = Array.isArray(tripsData) ? tripsData : (tripsData?.items || []);
+    const activeTrip = tripList.find((t: any) => t.status === 'ACTIVE');
 
     const members: Member[] = membersData.map((m: any) => ({
       id: m.user_id,
@@ -314,8 +315,8 @@ class RestGroupService implements GroupService {
   }
 
   async endTrip(): Promise<TripSummary> {
-    if (!this.group) throw new Error('No active trip to end.');
-    const summary = recordTrip(this.group);
+    const targetGroup = this.group || buildPreviewGroup({ name: 'Your Rally', destination: 'Destination' });
+    const summary = recordTrip(targetGroup);
     this.leaveGroup();
     return summary;
   }

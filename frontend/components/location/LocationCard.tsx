@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useLocation, getLocationQuality } from '@/hooks/useLocation';
 import { Play, Square, AlertTriangle, CheckCircle2, Crosshair, MapPin } from 'lucide-react';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 
 export default function LocationCard() {
   const { location, isTracking, error, permissionState, startTracking, stopTracking } = useLocation();

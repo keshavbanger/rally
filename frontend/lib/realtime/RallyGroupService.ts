@@ -35,6 +35,7 @@ import { getMe } from '@/lib/api/auth';
 import * as alertsApi from '@/lib/api/alerts';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as groupsApi from '@/lib/api/groups';
+import * as locationsApi from '@/lib/api/locations';
 import * as routesApi from '@/lib/api/routes';
 import * as sosApi from '@/lib/api/sos';
 import * as tripsApi from '@/lib/api/trips';
@@ -125,11 +126,19 @@ class RallyGroupService implements GroupService {
 
   async joinGroup(rawCode: string): Promise<Group> {
     const apiGroup = await groupsApi.joinGroup(rawCode.trim());
-    const trip = await this.findRelevantTrip(apiGroup.id);
+    let trip = await this.findRelevantTrip(apiGroup.id);
     if (!trip) {
-      throw new Error('You joined the group, but it has no trip in progress yet.');
+      try {
+        trip = await tripsApi.createTrip(apiGroup.id, { destination_name: apiGroup.destination_name ?? undefined });
+      } catch (tripErr) {
+        console.warn('Could not auto-create trip on join:', tripErr);
+      }
     }
-    await this.attachToTrip(apiGroup, trip);
+    if (trip) {
+      await this.attachToTrip(apiGroup, trip);
+    } else {
+      await this.attachGroupWithoutTrip(apiGroup);
+    }
     return this.requireGroup();
   }
 
@@ -182,12 +191,38 @@ class RallyGroupService implements GroupService {
     }
   }
 
-  startTrip(): void {
+  async startTrip(): Promise<void> {
+    if (!this.apiTrip && this.apiGroup) {
+      try {
+        const newTrip = await tripsApi.createTrip(this.apiGroup.id, {
+          destination_name: this.group?.destination && this.group.destination !== 'Destination' ? this.group.destination : undefined,
+        });
+        this.apiTrip = newTrip;
+      } catch (err) {
+        console.warn('Failed to auto-create trip before starting:', err);
+      }
+    }
     if (!this.apiTrip) return;
-    void tripsApi.startTrip(this.apiTrip.id).then(() => this.refresh()).catch(console.error);
+    try {
+      if (this.apiTrip.status === 'CREATED') {
+        const started = await tripsApi.startTrip(this.apiTrip.id);
+        this.apiTrip = started;
+      }
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to start trip on backend:', err);
+      await this.refresh();
+    }
   }
 
-  setTripRoute(destination: string, destLat: number, destLng: number, route: { lat: number; lng: number }[], distanceMeters: number, durationSeconds: number): void {
+  async setTripRoute(
+    destination: string,
+    destLat: number,
+    destLng: number,
+    route: { lat: number; lng: number }[],
+    distanceMeters: number,
+    durationSeconds: number
+  ): Promise<void> {
     if (!this.group) return;
     this.group = {
       ...this.group,
@@ -202,9 +237,62 @@ class RallyGroupService implements GroupService {
       },
     };
     this.emit();
+
+    // Persist to backend if trip exists or can be created
+    if (!this.apiTrip && this.apiGroup) {
+      try {
+        const newTrip = await tripsApi.createTrip(this.apiGroup.id, { destination_name: destination });
+        this.apiTrip = newTrip;
+      } catch (err) {
+        console.warn('Could not auto-create trip for route:', err);
+      }
+    }
+
+    if (this.apiTrip && route.length >= 2) {
+      try {
+        await routesApi.createRoute(this.apiTrip.id, {
+          name: destination,
+          origin_latitude: route[0].lat,
+          origin_longitude: route[0].lng,
+          destination_latitude: destLat,
+          destination_longitude: destLng,
+          coordinates: route.map((p) => [p.lng, p.lat]),
+          estimated_duration_seconds: Math.round(durationSeconds),
+        });
+      } catch (err) {
+        console.warn('Failed to persist route to backend:', err);
+      }
+    }
   }
 
   updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void {
+    if (this.currentUserId) {
+      const existing = this.livePositions.get(this.currentUserId);
+      this.livePositions.set(this.currentUserId, {
+        user_id: this.currentUserId,
+        name: existing?.name ?? this.group?.members.find((m) => m.id === this.currentUserId)?.name ?? 'You',
+        role: existing?.role ?? (this.group?.members.find((m) => m.id === this.currentUserId)?.role === 'Leader' ? 'LEADER' : 'MEMBER'),
+        latitude: lat,
+        longitude: lng,
+        accuracy: null,
+        speed: speed ?? 0,
+        heading: heading ?? 0,
+        recorded_at: new Date().toISOString(),
+        status: 'ONLINE',
+      });
+      if (this.group) {
+        this.group = {
+          ...this.group,
+          members: this.group.members.map((m) =>
+            m.id === this.currentUserId
+              ? { ...m, lat, lng, speedKmh: speed ? speed * 3.6 : 0, headingDeg: heading ?? 0, online: true }
+              : m
+          ),
+        };
+        this.emit();
+      }
+    }
+
     this.sendLocationUpdate({
       latitude: lat,
       longitude: lng,
@@ -233,8 +321,47 @@ class RallyGroupService implements GroupService {
   }
 
   async endTrip(): Promise<TripSummary> {
-    if (!this.apiTrip) throw new Error('No active trip to end.');
-    const ended = await tripsApi.endTrip(this.apiTrip.id);
+    if (!this.apiTrip && this.apiGroup) {
+      const found = await this.findRelevantTrip(this.apiGroup.id);
+      if (found) {
+        this.apiTrip = found;
+      }
+    }
+
+    if (!this.apiTrip) {
+      const fallbackTrip: ApiTrip = {
+        id: this.apiGroup?.id ?? this.group?.id ?? 'completed',
+        group_id: this.apiGroup?.id ?? this.group?.id ?? 'completed',
+        status: 'COMPLETED',
+        started_by: this.currentUserId ?? null,
+        started_at: null,
+        ended_at: new Date().toISOString(),
+        destination_name: this.group?.destination ?? 'Destination',
+        distance: this.group?.trip?.distanceKm ?? 0,
+        duration: this.group?.trip?.durationMin ?? 0,
+        safety_score: this.group?.risk?.score ?? 100,
+        created_at: new Date().toISOString(),
+      };
+      const summary = this.buildTripSummary(fallbackTrip, null, null);
+      await this.teardown();
+      return summary;
+    }
+
+    let ended = this.apiTrip;
+    if (this.apiTrip.status === 'ACTIVE') {
+      try {
+        ended = await tripsApi.endTrip(this.apiTrip.id);
+      } catch (err) {
+        console.warn('Failed to end active trip on backend:', err);
+      }
+    } else if (this.apiTrip.status === 'CREATED') {
+      try {
+        ended = await tripsApi.cancelTrip(this.apiTrip.id);
+      } catch (err) {
+        console.warn('Failed to cancel created trip on backend:', err);
+      }
+    }
+
     const [analytics, insights] = await Promise.all([
       analyticsApi.getTripAnalytics(ended.id).catch(() => null),
       analyticsApi.getTripInsights(ended.id).catch(() => null),
@@ -274,10 +401,24 @@ class RallyGroupService implements GroupService {
     try {
       const groups = await groupsApi.listMyGroups();
       for (const g of groups) {
-        const trip = await this.findRelevantTrip(g.id);
+        const fullGroup = await groupsApi.getGroup(g.id).catch(() => null);
+        if (!fullGroup) continue;
+
+        let trip = await this.findRelevantTrip(g.id);
+        if (!trip) {
+          // If the group exists in the backend without a trip, auto-create one
+          try {
+            trip = await tripsApi.createTrip(g.id, { destination_name: fullGroup.destination_name ?? undefined });
+          } catch (tripErr) {
+            console.warn('Could not auto-create trip for group', g.id, tripErr);
+          }
+        }
         if (trip) {
-          const fullGroup = await groupsApi.getGroup(g.id);
           await this.attachToTrip(fullGroup, trip);
+          return;
+        } else {
+          // Fallback: attach group state even if no trip exists yet
+          await this.attachGroupWithoutTrip(fullGroup);
           return;
         }
       }
@@ -329,6 +470,61 @@ class RallyGroupService implements GroupService {
     }
 
     this.refreshTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
+  }
+
+  private async attachGroupWithoutTrip(fullGroup: ApiGroup): Promise<void> {
+    await this.teardownSocketAndTimer();
+    this.apiGroup = fullGroup;
+    this.apiTrip = null;
+    this.livePositions.clear();
+
+    const token = await getCurrentAccessToken();
+    if (token) {
+      try {
+        const me = await getMe();
+        this.currentUserId = me.id;
+      } catch {
+        this.currentUserId = null;
+      }
+    }
+
+    const members = await groupsApi.getGroupMembers(fullGroup.id).catch(() => []);
+    this.group = {
+      id: fullGroup.id,
+      name: fullGroup.name,
+      destination: fullGroup.destination_name ?? 'Destination',
+      destinationLat: 0,
+      destinationLng: 0,
+      maxMembers: Math.max(members.length, 5),
+      joinCode: fullGroup.join_code,
+      createdAt: new Date(fullGroup.created_at).getTime(),
+      members: members.map((m) => ({
+        id: m.user_id,
+        name: m.name ?? 'Member',
+        role: m.role === 'LEADER' ? 'Leader' : 'Member',
+        isCurrentUser: m.user_id === this.currentUserId,
+        online: true,
+        status: 'safe',
+        lat: 0,
+        lng: 0,
+        speedKmh: 0,
+        headingDeg: 0,
+        distanceFromGroupM: 0,
+        lastSeen: 'Just now',
+      })),
+      alerts: [],
+      route: [],
+      trip: {
+        distanceKm: 0,
+        durationMin: 0,
+        membersCount: members.length,
+        alertsCount: 0,
+        startedAt: Date.now(),
+      },
+      risk: { score: 100, level: 'LOW RISK' },
+      paused: false,
+    };
+    this.emit();
   }
 
   private handleSocketMessage(message: ServerMessage): void {
@@ -383,8 +579,11 @@ class RallyGroupService implements GroupService {
     }
   }
 
-  private async refresh(): Promise<void> {
-    if (!this.apiGroup || !this.apiTrip) return;
+  async refresh(): Promise<void> {
+    if (!this.apiGroup || !this.apiTrip) {
+      await this.init();
+      return;
+    }
     try {
       const [dashboard, members, alerts] = await Promise.all([
         analyticsApi.getDashboard(this.apiTrip.id),

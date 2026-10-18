@@ -8,7 +8,7 @@ import RequireGroup from '@/components/dashboard/RequireGroup';
 import LiveMap from '@/components/map/LiveMap';
 import { searchDestination, Destination } from '@/lib/services/geocoding';
 import { calculateRoute, RouteOption } from '@/lib/services/routing';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 
 function useDeviceLocation() {
   const [loc, setLoc] = useState<{lat: number, lng: number} | null>(null);
@@ -136,18 +136,22 @@ export default function RoutePage() {
     return `~${h} hr ${mRem} min`;
   };
 
-  const handleStartTrip = () => {
+  const handleStartTrip = async () => {
     const selectedRoute = routeAlternatives.find(r => r.id === selectedRouteId);
     if (selectedRoute && destination) {
-      groupService.setTripRoute(
-        destination.name,
-        destination.latitude,
-        destination.longitude,
-        selectedRoute.coordinates,
-        selectedRoute.distance,
-        selectedRoute.duration
-      );
-      groupService.startTrip();
+      try {
+        await groupService.setTripRoute(
+          destination.name,
+          destination.latitude,
+          destination.longitude,
+          selectedRoute.coordinates,
+          selectedRoute.distance,
+          selectedRoute.duration
+        );
+        await groupService.startTrip();
+      } catch (err) {
+        console.warn('Trip route start warning:', err);
+      }
     }
     router.push('/dashboard/trip');
   };

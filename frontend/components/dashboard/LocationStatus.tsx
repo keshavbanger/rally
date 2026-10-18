@@ -2,7 +2,7 @@
 
 import { useLocation, getLocationQuality } from '@/hooks/useLocation';
 import { Play, Square, MapPin } from 'lucide-react';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 import { useEffect } from 'react';
 
 export default function LocationStatus() {

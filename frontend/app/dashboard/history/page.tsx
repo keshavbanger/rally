@@ -7,6 +7,7 @@ import { Search, Compass, Loader2 } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/lib/mock/useGroup';
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
+import * as tripsApi from '@/lib/api/trips';
 import type { TripSummary } from '@/lib/mock/types';
 
 export default function TripHistoryPage() {
@@ -19,7 +20,61 @@ export default function TripHistoryPage() {
   const [allTrips, setAllTrips] = useState<TripSummary[] | null>(null);
 
   useEffect(() => {
-    setAllTrips(getTripHistory());
+    let cancelled = false;
+    async function loadTrips() {
+      const local = getTripHistory();
+      try {
+        const remote = await tripsApi.listMyTripHistory({ limit: 50 });
+        if (cancelled) return;
+        if (remote && remote.items && remote.items.length > 0) {
+          const remoteMapped: TripSummary[] = remote.items.map((t) => {
+            const started = t.started_at ? new Date(t.started_at) : new Date();
+            return {
+              id: t.trip_id,
+              groupName: t.name || 'Rally Trip',
+              destination: (t as any).destination_name || 'Destination',
+              date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
+              distanceKm: (t as any).distance ? Number(((t as any).distance / 1000).toFixed(1)) : 0,
+              durationMin: (t as any).duration ? Math.round((t as any).duration / 60) : 0,
+              membersCount: (t as any).member_count || 1,
+              alertsCount: (t as any).alerts_count ?? 0,
+              routeDeviations: null,
+              separationEvents: null,
+              unexpectedStops: null,
+              sosCount: null,
+              safetyScore: (t as any).safety_score ?? 100,
+              riskLevel: 'LOW RISK',
+              route: [],
+              destinationLat: 0,
+              destinationLng: 0,
+              alertPoints: [],
+              deviationPoint: null,
+              keyEvents: [],
+              insights: [],
+            };
+          });
+
+          const merged = [...remoteMapped];
+          for (const loc of local) {
+            if (!merged.some((m) => m.id === loc.id)) {
+              merged.push(loc);
+            }
+          }
+          setAllTrips(merged);
+          return;
+        }
+      } catch (err) {
+        console.warn('Could not fetch remote trip history, falling back to local:', err);
+      }
+      if (!cancelled) {
+        setAllTrips(local);
+      }
+    }
+    loadTrips();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (allTrips === null) {

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ShieldCheck, Check, MapPin, X, AlertTriangle, AlertCircle, Info, BellRing, Navigation } from 'lucide-react';
 import RequireGroup from '@/components/dashboard/RequireGroup';
 import Topbar from '@/components/dashboard/Topbar';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 import type { AlertItem, Group } from '@/lib/mock/types';
 
 // Helper to get relative time

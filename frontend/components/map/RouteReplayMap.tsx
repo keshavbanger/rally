@@ -1,178 +1,154 @@
 'use client';
 
-import 'leaflet/dist/leaflet.css';
-import React, { useEffect, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
-import type { Map as LeafletMap } from 'leaflet';
-import type { TripSummary } from '@/lib/mock/types';
+/**
+ * RouteReplayMap – Google Maps version for RALLY trip history.
+ *
+ * Preserves the same TripSummary prop shape as the old Leaflet implementation.
+ * Shows the recorded route polyline, start/end markers, alert points, and
+ * deviation markers on a dark Google Map.
+ */
 
-const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
-const Popup = dynamic(() => import('react-leaflet').then((m) => m.Popup), { ssr: false });
-const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
-const MapBridge = dynamic(() => import('./MapBridge'), { ssr: false });
+import React, { useEffect, useRef } from 'react';
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  InfoWindow,
+  useMap,
+} from '@vis.gl/react-google-maps';
+import { AlertTriangle } from 'lucide-react';
+import type { TripSummary } from '@/lib/mock/types';
+import { hasGoogleMapsKey, GOOGLE_MAPS_API_KEY } from '@/lib/services/googleMaps';
 
 interface RouteReplayMapProps {
   summary: TripSummary;
 }
 
-export default function RouteReplayMap({ summary }: RouteReplayMapProps) {
-  const [mounted, setMounted] = useState(false);
-  const [L, setL] = useState<any>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
+// ─── Inner component (needs Map context) ─────────────────────────────────────
 
-  const handleMapReady = (map: LeafletMap) => {
-    mapRef.current = map;
-    // Fit bounds once the map is ready
-    if (hasRouteDerived(summary.route ?? [])) {
-      const pts = (summary.route ?? []).map((p): [number, number] => [p.lat, p.lng]);
-      try {
-        // @ts-ignore
-        map.fitBounds(pts, { padding: [40, 40], maxZoom: 16 });
-      } catch { /* ignore */ }
-    }
-  };
-  useEffect(() => {
-    setMounted(true);
-    import('leaflet').then((mod) => setL(mod.default));
-  }, []);
-
-  if (!mounted || !L) {
-    return (
-      <div className="w-full h-full min-h-[300px] rounded-2xl border border-border bg-card flex flex-col items-center justify-center text-muted-foreground gap-3">
-        <div className="w-8 h-8 border-2 border-rally-blue border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium">Loading map…</p>
-      </div>
-    );
-  }
+function ReplayMapContent({ summary }: RouteReplayMapProps) {
+  const map = useMap();
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const [activePopup, setActivePopup] = React.useState<string | null>(null);
 
   const route = summary.route ?? [];
   const hasRoute = route.length >= 2;
+  const routePath = route.map((p) => ({ lat: p.lat, lng: p.lng }));
 
-  // Helper to check hasRoute before mount (needed in handleMapReady)
-  function hasRouteDerived(r: typeof route) { return r.length >= 2; }
+  // ── Draw route polyline ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map || !hasRoute) return;
 
-  // Derive map centre: prefer route midpoint → destination → fallback
+    polylineRef.current = new google.maps.Polyline({
+      path: routePath,
+      strokeColor: '#19BFFF',
+      strokeWeight: 3,
+      strokeOpacity: 0.85,
+      map,
+    });
+
+    // Fit bounds to the entire route
+    const bounds = new google.maps.LatLngBounds();
+    routePath.forEach((p) => bounds.extend(p));
+    if (summary.destinationLat && summary.destinationLng) {
+      bounds.extend({ lat: summary.destinationLat, lng: summary.destinationLng });
+    }
+    if (!bounds.isEmpty()) map.fitBounds(bounds, 40);
+
+    return () => {
+      polylineRef.current?.setMap(null);
+      polylineRef.current = null;
+    };
+  }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Derive map centre ─────────────────────────────────────────────────────
   const midIndex = Math.floor(route.length / 2);
-  const centre: [number, number] = route.length > 0
-    ? [route[midIndex].lat, route[midIndex].lng]
-    : [summary.destinationLat || 0, summary.destinationLng || 0];
-
-  const routePositions = route.map((p): [number, number] => [p.lat, p.lng]);
-
-  const startIcon = L.divIcon({
-    className: '',
-    html: `
-      <div style="width:22px;height:22px;border-radius:50%;background:#34D399;border:2.5px solid #fff;box-shadow:0 0 8px rgba(52,211,153,0.8);display:flex;align-items:center;justify-content:center;">
-      </div>
-    `,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-
-  const endIcon = L.divIcon({
-    className: '',
-    html: `
-      <div style="position:relative;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">
-        <div style="width:14px;height:14px;border-radius:3px;background:#19BFFF;transform:rotate(45deg);box-shadow:0 0 10px rgba(25,191,255,0.8);border:2px solid white;"></div>
-      </div>
-    `,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
-
-  const alertIcon = L.divIcon({
-    className: '',
-    html: `
-      <div style="width:20px;height:20px;border-radius:5px;background:#F59E0B;border:2px solid #0A0A0A;display:flex;align-items:center;justify-content:center;color:#0A0A0A;font-size:12px;font-weight:900;box-shadow:0 0 6px rgba(245,158,11,0.7);">!</div>
-    `,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-  });
-
-  const deviationIcon = L.divIcon({
-    className: '',
-    html: `
-      <div style="width:20px;height:20px;border-radius:50%;background:#EF4444;border:2px solid #fff;box-shadow:0 0 8px rgba(239,68,68,0.7);display:flex;align-items:center;justify-content:center;">
-      </div>
-    `,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-  });
+  const centre =
+    route.length > 0
+      ? { lat: route[midIndex].lat, lng: route[midIndex].lng }
+      : { lat: summary.destinationLat ?? 19.076, lng: summary.destinationLng ?? 72.877 };
 
   return (
-    <div className="w-full h-full min-h-[300px] rounded-2xl overflow-hidden relative">
-      <MapContainer
-        center={centre}
-        zoom={13}
-        className="w-full h-full"
-        zoomControl={false}
-      >
-        <MapBridge onReady={handleMapReady} />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-          subdomains="abcd"
-          maxZoom={19}
-        />
+    <>
+      <Map
+        defaultCenter={centre}
+        defaultZoom={13}
+        mapId="rally-replay-map"
+        disableDefaultUI
+        gestureHandling="greedy"
+        style={{ width: '100%', height: '100%' }}
+        colorScheme="DARK"
+      />
 
-        {/* Route polyline */}
-        {hasRoute && (
-          <Polyline
-            positions={routePositions}
-            pathOptions={{ color: '#19BFFF', weight: 3, opacity: 0.85 }}
-          />
-        )}
+      {/* Start marker */}
+      {hasRoute && (
+        <AdvancedMarker
+          position={routePath[0]}
+          onClick={() => setActivePopup('start')}
+        >
+          <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#34D399', border: '2.5px solid #fff', boxShadow: '0 0 8px rgba(52,211,153,0.8)' }} />
+          {activePopup === 'start' && (
+            <InfoWindow onClose={() => setActivePopup(null)} position={routePath[0]}>
+              <span style={{ color: '#000', fontSize: 12, fontWeight: 600 }}>Start</span>
+            </InfoWindow>
+          )}
+        </AdvancedMarker>
+      )}
 
-        {/* Start marker */}
-        {hasRoute && (
-          <Marker position={routePositions[0]} icon={startIcon}>
-            <Popup>
-              <span className="text-xs font-semibold">Start</span>
-            </Popup>
-          </Marker>
-        )}
-
-        {/* End / destination marker */}
-        {(hasRoute || (summary.destinationLat && summary.destinationLng)) && (
-          <Marker
-            position={
-              hasRoute
-                ? routePositions[routePositions.length - 1]
-                : [summary.destinationLat, summary.destinationLng]
-            }
-            icon={endIcon}
-          >
-            <Popup>
-              <span className="text-xs font-semibold">
+      {/* End / destination marker */}
+      {(hasRoute || (summary.destinationLat && summary.destinationLng)) && (
+        <AdvancedMarker
+          position={
+            hasRoute
+              ? routePath[routePath.length - 1]
+              : { lat: summary.destinationLat!, lng: summary.destinationLng! }
+          }
+          onClick={() => setActivePopup('end')}
+        >
+          <div style={{ width: 14, height: 14, borderRadius: 3, background: '#19BFFF', transform: 'rotate(45deg)', boxShadow: '0 0 10px rgba(25,191,255,0.8)', border: '2px solid white' }} />
+          {activePopup === 'end' && (
+            <InfoWindow
+              onClose={() => setActivePopup(null)}
+              position={hasRoute ? routePath[routePath.length - 1] : { lat: summary.destinationLat!, lng: summary.destinationLng! }}
+            >
+              <span style={{ color: '#000', fontSize: 12, fontWeight: 600 }}>
                 {summary.destination || 'Destination'}
               </span>
-            </Popup>
-          </Marker>
-        )}
+            </InfoWindow>
+          )}
+        </AdvancedMarker>
+      )}
 
-        {/* Alert points */}
-        {(summary.alertPoints ?? []).map((pt, i) => (
-          <Marker key={`alert-${i}`} position={[pt.lat, pt.lng]} icon={alertIcon}>
-            <Popup>
-              <span className="text-xs">{pt.label}</span>
-            </Popup>
-          </Marker>
-        ))}
+      {/* Alert points */}
+      {(summary.alertPoints ?? []).map((pt, i) => (
+        <AdvancedMarker
+          key={`alert-${i}`}
+          position={{ lat: pt.lat, lng: pt.lng }}
+          onClick={() => setActivePopup(`alert-${i}`)}
+        >
+          <div style={{ width: 20, height: 20, borderRadius: 5, background: '#F59E0B', border: '2px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0A0A0A', fontSize: 12, fontWeight: 900, boxShadow: '0 0 6px rgba(245,158,11,0.7)' }}>!</div>
+          {activePopup === `alert-${i}` && (
+            <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: pt.lat, lng: pt.lng }}>
+              <span style={{ color: '#000', fontSize: 12 }}>{pt.label}</span>
+            </InfoWindow>
+          )}
+        </AdvancedMarker>
+      ))}
 
-        {/* Deviation point */}
-        {summary.deviationPoint && (
-          <Marker
-            position={[summary.deviationPoint.lat, summary.deviationPoint.lng]}
-            icon={deviationIcon}
-          >
-            <Popup>
-              <span className="text-xs font-semibold">Route deviation</span>
-            </Popup>
-          </Marker>
-        )}
-      </MapContainer>
+      {/* Deviation marker */}
+      {summary.deviationPoint && (
+        <AdvancedMarker
+          position={{ lat: summary.deviationPoint.lat, lng: summary.deviationPoint.lng }}
+          onClick={() => setActivePopup('deviation')}
+        >
+          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#EF4444', border: '2px solid #fff', boxShadow: '0 0 8px rgba(239,68,68,0.7)' }} />
+          {activePopup === 'deviation' && (
+            <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: summary.deviationPoint.lat, lng: summary.deviationPoint.lng }}>
+              <span style={{ color: '#000', fontSize: 12, fontWeight: 600 }}>Route deviation</span>
+            </InfoWindow>
+          )}
+        </AdvancedMarker>
+      )}
 
       {/* Legend */}
       <div className="absolute bottom-3 left-3 z-[1000] flex items-center gap-3 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
@@ -181,15 +157,7 @@ export default function RouteReplayMap({ summary }: RouteReplayMapProps) {
           Start
         </span>
         <span className="flex items-center gap-1.5 text-[11px] text-white/70">
-          <span
-            className="w-2.5 h-2.5 shrink-0"
-            style={{
-              background: '#19BFFF',
-              borderRadius: '2px',
-              transform: 'rotate(45deg)',
-              display: 'inline-block',
-            }}
-          />
+          <span className="w-2.5 h-2.5 shrink-0" style={{ background: '#19BFFF', borderRadius: 2, transform: 'rotate(45deg)', display: 'inline-block' }} />
           End
         </span>
         {(summary.alertPoints?.length ?? 0) > 0 && (
@@ -199,6 +167,30 @@ export default function RouteReplayMap({ summary }: RouteReplayMapProps) {
           </span>
         )}
       </div>
+    </>
+  );
+}
+
+// ─── Root export ──────────────────────────────────────────────────────────────
+
+export default function RouteReplayMap({ summary }: RouteReplayMapProps) {
+  if (!hasGoogleMapsKey()) {
+    return (
+      <div className="w-full h-full min-h-[300px] rounded-2xl border border-amber-500/30 bg-amber-500/5 flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <AlertTriangle className="w-6 h-6 text-amber-400" />
+        <p className="text-xs text-muted-foreground max-w-xs">
+          Add <code className="bg-white/10 px-1 rounded">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to{' '}
+          <code className="bg-white/10 px-1 rounded">frontend/.env.local</code> to view the map.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full min-h-[300px] rounded-2xl overflow-hidden relative">
+      <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+        <ReplayMapContent summary={summary} />
+      </APIProvider>
     </div>
   );
 }

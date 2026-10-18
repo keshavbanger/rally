@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { Minus, Plus, Copy, Check, ArrowRight, Users } from 'lucide-react';
 import { buildPreviewGroup } from '@/lib/mock/groupService';
 import { createGroup as apiCreateGroup } from '@/lib/api/groups';
+import { createTrip, startTrip } from '@/lib/api/trips';
+import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
 import LiveMap from '@/components/map/LiveMap';
 
 const DESTINATIONS = ['Solang Valley', 'Rohtang Pass', 'Kasol', 'Manali', 'Leh Ladakh', 'Spiti Valley'];
@@ -30,11 +32,27 @@ export default function CreateGroupPage() {
     
     setSubmitting(true);
     try {
-      // Uses lib/api/groups.ts → apiRequest → POST /api/v1/groups
+      // 1. Create the group on the backend
       const group = await apiCreateGroup({
         name: name.trim(),
         destination_name: destination.trim(),
       });
+
+      // 2. Automatically create the initial trip for this group
+      try {
+        const trip = await createTrip(group.id, { destination_name: destination.trim() });
+        await startTrip(trip.id).catch(() => {});
+      } catch (tripErr) {
+        console.warn('Trip creation deferred:', tripErr);
+      }
+
+      // 3. Immediately refresh group service so dashboard loads it
+      try {
+        await rallyGroupService.refresh();
+      } catch (refreshErr) {
+        console.warn('Group service refresh deferred:', refreshErr);
+      }
+
       setJoinCode(group.join_code);
     } catch (err: any) {
       console.error('Failed to create group:', err);
