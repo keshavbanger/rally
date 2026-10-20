@@ -537,17 +537,25 @@ class RallyGroupService implements GroupService {
         this.rebuildGroup();
         break;
       case 'location_update': {
-        const existing = this.livePositions.get(message.data.user_id);
-        this.livePositions.set(message.data.user_id, {
-          user_id: message.data.user_id,
+        const payload: any = (message as any).data || message;
+        const userId = payload.user_id || payload.userId;
+        if (!userId) break;
+        const lat = typeof payload.latitude === 'number' ? payload.latitude : parseFloat(payload.latitude);
+        const lng = typeof payload.longitude === 'number' ? payload.longitude : parseFloat(payload.longitude);
+        if (isNaN(lat) || isNaN(lng) || !isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) {
+          break;
+        }
+        const existing = this.livePositions.get(userId);
+        this.livePositions.set(userId, {
+          user_id: userId,
           name: existing?.name ?? null,
           role: existing?.role ?? 'MEMBER',
-          latitude: message.data.latitude,
-          longitude: message.data.longitude,
-          accuracy: message.data.accuracy,
-          speed: message.data.speed,
-          heading: message.data.heading,
-          recorded_at: message.data.recorded_at,
+          latitude: lat,
+          longitude: lng,
+          accuracy: payload.accuracy ?? null,
+          speed: payload.speed ?? null,
+          heading: payload.heading ?? null,
+          recorded_at: payload.recorded_at || payload.timestamp || new Date().toISOString(),
           status: 'ONLINE',
         });
         this.rebuildGroup();
@@ -591,7 +599,7 @@ class RallyGroupService implements GroupService {
         alertsApi.listActiveTripAlerts(this.apiTrip.id).catch(() => [] as ApiAlert[]),
       ]);
       this.lastDashboard = dashboard;
-      this.activeAlerts = alerts;
+      this.activeAlerts = Array.isArray(alerts) ? alerts : (alerts as any)?.alerts ?? [];
       this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
       this.rebuildGroup(members);
     } catch (err) {
@@ -601,10 +609,10 @@ class RallyGroupService implements GroupService {
   }
 
   private rebuildGroup(memberList?: ApiGroupMember[]): void {
-    if (!this.apiGroup || !this.apiTrip || !this.lastDashboard) return;
+    if (!this.apiGroup && !this.group) return;
 
     const dashboard = this.lastDashboard;
-    const dashboardByUser = new Map(dashboard.members.map((m) => [m.user_id, m]));
+    const dashboardByUser = dashboard ? new Map(dashboard.members.map((m) => [m.user_id, m])) : new Map();
     const alertsByUser = new Map<string, ApiAlert>();
     for (const alert of this.activeAlerts) {
       if (alert.user_id && (!alertsByUser.has(alert.user_id) || alert.severity === 'CRITICAL')) {
@@ -662,28 +670,31 @@ class RallyGroupService implements GroupService {
       };
     });
 
-    const startedAt = this.apiTrip.started_at ? new Date(this.apiTrip.started_at).getTime() : Date.now();
+    const startedAt = this.apiTrip?.started_at ? new Date(this.apiTrip.started_at).getTime() : (this.group?.trip?.startedAt ?? Date.now());
 
     this.group = {
-      id: this.apiGroup.id,
-      name: this.apiGroup.name,
-      destination: this.apiGroup.destination_name ?? this.apiTrip.destination_name ?? 'Destination',
-      destinationLat: 0,
-      destinationLng: 0,
+      id: this.apiGroup?.id ?? this.group?.id ?? '',
+      name: this.apiGroup?.name ?? this.group?.name ?? '',
+      destination: this.apiGroup?.destination_name ?? this.apiTrip?.destination_name ?? this.group?.destination ?? 'Destination',
+      destinationLat: this.group?.destinationLat ?? 0,
+      destinationLng: this.group?.destinationLng ?? 0,
       maxMembers: Math.max(members.length, 5),
-      joinCode: this.apiGroup.join_code,
-      createdAt: new Date(this.apiGroup.created_at).getTime(),
+      joinCode: this.apiGroup?.join_code ?? this.group?.joinCode ?? '',
+      createdAt: this.apiGroup ? new Date(this.apiGroup.created_at).getTime() : (this.group?.createdAt ?? Date.now()),
       members,
       alerts,
-      route: [],
+      route: this.group?.route ?? [],
       trip: {
-        distanceKm: dashboard.route.distance_meters != null ? dashboard.route.distance_meters / 1000 : 0,
+        distanceKm: dashboard?.route?.distance_meters != null ? dashboard.route.distance_meters / 1000 : (this.group?.trip?.distanceKm ?? 0),
         durationMin: Math.max(0, Math.round((Date.now() - startedAt) / 60_000)),
         membersCount: members.length,
         alertsCount: alerts.length,
         startedAt,
       },
-      risk: { score: dashboard.risk.score, level: riskLevelFromBackend(dashboard.risk.level) },
+      risk: {
+        score: dashboard?.risk?.score ?? (this.group?.risk?.score ?? 100),
+        level: dashboard?.risk?.level ? riskLevelFromBackend(dashboard.risk.level) : (this.group?.risk?.level ?? 'LOW RISK'),
+      },
       paused: this.group?.paused ?? false,
     };
 
@@ -696,8 +707,13 @@ class RallyGroupService implements GroupService {
     if (!this.apiTrip || !this.group) return;
     if (this.routeLoadedForTrip === this.apiTrip.id) return;
     try {
-      const route = await routesApi.getRoute(this.apiTrip.id);
-      this.routeLoadedForTrip = this.apiTrip.id;
+      const envelope = await routesApi.getRoute(this.apiTrip.id);
+      this.routeLoadedForTrip = this.apiTrip.id; // mark as checked regardless
+      if (!envelope.route) {
+        // No route saved for this trip yet — not an error, just no geometry to draw
+        return;
+      }
+      const route = envelope.route;
       if (!this.group) return;
       this.group = {
         ...this.group,
@@ -707,9 +723,8 @@ class RallyGroupService implements GroupService {
       };
       this.emit();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        this.routeLoadedForTrip = this.apiTrip.id; // no route on this trip — stop asking every refresh
-      }
+      // Only unexpected errors reach here (network failure, auth error, etc.)
+      console.warn('[RallyGroupService] Failed to load route geometry:', err);
     }
   }
 
@@ -782,9 +797,25 @@ class RallyGroupService implements GroupService {
    * A no-op if there's no open socket (trip not ACTIVE, or "paused" —
    * see pauseTrip()'s docstring) rather than falling back to a REST
    * call, which would defeat the point of throttling client-side. */
-  sendLocationUpdate(data: { latitude: number; longitude: number; accuracy: number | null; speed: number | null; heading: number | null }): void {
+  sendLocationUpdate(data: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    speed?: number | null;
+    heading?: number | null;
+    recorded_at?: string | null;
+    timestamp?: number | string | null;
+  }): void {
     if (this.group?.paused) return;
-    this.socket?.sendLocationUpdate(data);
+    const recordedAt = data.recorded_at ?? (data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString());
+    this.socket?.sendLocationUpdate({
+      latitude: data.latitude,
+      longitude: data.longitude,
+      accuracy: data.accuracy ?? null,
+      speed: data.speed ?? null,
+      heading: data.heading ?? null,
+      recorded_at: recordedAt,
+    });
   }
 
   /** The most recent dashboard response backing the current `group` —

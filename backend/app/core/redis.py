@@ -50,8 +50,15 @@ def init_redis() -> None:
             # worker's tick) forever.
             socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
             socket_timeout=settings.REDIS_SOCKET_TIMEOUT_SECONDS,
-            retry_on_timeout=True,
-            health_check_interval=30,
+            retry_on_timeout=False,
+            # Do NOT set health_check_interval here. redis-py's background
+            # health check fires a PING from a background coroutine every
+            # N seconds. When Redis is unreachable the resulting TimeoutError
+            # is raised from inside the pool's bookkeeping rather than from
+            # our own awaits, so it can't be caught by any try/except in
+            # application code and crashes WebSocket disconnect handlers.
+            # GET /health already calls ping_redis() explicitly — that's
+            # sufficient; we don't need a background timer on top of it.
         )
     except Exception as exc:
         logger.error(

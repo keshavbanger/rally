@@ -125,14 +125,17 @@ async def _classify_all_members(
             speed = location.get("speed")
 
         state_key = intel_movement_state_key(trip_id, uid_str)
-        raw_prev = await redis.get(state_key)
         previous_state: Optional[str] = None
         pending_since: Optional[datetime] = None
-        if raw_prev:
-            parsed = json.loads(raw_prev)
-            previous_state = parsed.get("state")
-            if parsed.get("pending_since"):
-                pending_since = datetime.fromisoformat(parsed["pending_since"])
+        try:
+            raw_prev = await redis.get(state_key)
+            if raw_prev:
+                parsed = json.loads(raw_prev)
+                previous_state = parsed.get("state")
+                if parsed.get("pending_since"):
+                    pending_since = datetime.fromisoformat(parsed["pending_since"])
+        except Exception:
+            logger.warning("Redis unavailable reading movement state for user %s trip %s — treating as unknown", uid_str, trip_id)
 
         result = classify_movement_state(
             speed_mps=speed,
@@ -146,17 +149,22 @@ async def _classify_all_members(
             stale_location_seconds=thresholds.stale_location_seconds,
         )
 
-        await redis.set(
-            state_key,
-            json.dumps(
-                {
-                    "state": result.state,
-                    "pending_since": result.pending_since.isoformat() if result.pending_since else None,
-                }
-            ),
-            ex=3600,
-        )
+        try:
+            await redis.set(
+                state_key,
+                json.dumps(
+                    {
+                        "state": result.state,
+                        "pending_since": result.pending_since.isoformat() if result.pending_since else None,
+                    }
+                ),
+                ex=3600,
+            )
+        except Exception:
+            logger.warning("Redis unavailable writing movement state for user %s trip %s — debounce state not persisted", uid_str, trip_id)
+
         results[uid_str] = (result, previous_state)
+
 
     return results
 

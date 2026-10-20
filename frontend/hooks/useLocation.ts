@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { LocationData, LocationQuality } from '../types/location';
+import { rallyGroupServiceLocation } from '@/lib/realtime/RallyGroupService';
 
-export function useLocation() {
+export function useLocation(autoStart: boolean = true) {
   const [location, setLocation] = useState<LocationData | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,20 +39,46 @@ export function useLocation() {
       (position) => {
         const { latitude, longitude, accuracy, speed, heading } = position.coords;
 
-        // Validation
-        if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        // Validation: reject out of bounds or invalid numbers
+        if (
+          typeof latitude !== 'number' ||
+          typeof longitude !== 'number' ||
+          isNaN(latitude) ||
+          isNaN(longitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180 ||
+          (latitude === 0 && longitude === 0)
+        ) {
           return; // Ignore invalid coordinates
         }
 
-        setLocation({
+        const payload: LocationData = {
           latitude,
           longitude,
           accuracy,
           speed,
           heading,
           timestamp: position.timestamp,
-        });
+        };
+
+        setLocation(payload);
         setPermissionState('granted');
+
+        try {
+          rallyGroupServiceLocation.sendLocationUpdate({
+            latitude,
+            longitude,
+            accuracy: accuracy ?? null,
+            speed: speed ?? null,
+            heading: heading ?? null,
+            recorded_at: new Date(position.timestamp).toISOString(),
+            timestamp: position.timestamp,
+          });
+        } catch {
+          // Socket might be disconnected or not initialized yet; handled gracefully
+        }
       },
       (err) => {
         setIsTracking(false);

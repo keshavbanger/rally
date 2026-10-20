@@ -12,7 +12,6 @@ import { getTrip } from '@/lib/api/trips';
 import { getGroup } from '@/lib/api/groups';
 import { getTripAnalytics, getTripInsights, getTripRisk, getTripTimeline } from '@/lib/api/analytics';
 import { getRoute } from '@/lib/api/routes';
-import { ApiError } from '@/lib/api/errors';
 import type { RiskAssessment, TripEvent, TripSummary } from '@/lib/mock/types';
 import type { RiskLevel, TimelineEvent } from '@/lib/api/types';
 
@@ -46,17 +45,17 @@ function toTripEvent(event: TimelineEvent): TripEvent {
 export async function fetchTripSummary(tripId: string): Promise<TripSummary> {
   const trip = await getTrip(tripId);
 
-  const [group, analytics, insights, timeline, route, risk] = await Promise.all([
+  const [group, analytics, insights, timeline, routeEnvelope, risk] = await Promise.all([
     getGroup(trip.group_id).catch(() => null),
     getTripAnalytics(tripId).catch(() => null),
     getTripInsights(tripId).catch(() => null),
     getTripTimeline(tripId).catch(() => null),
-    getRoute(tripId).catch((err) => {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    }),
+    getRoute(tripId).catch(() => null),         // network/auth failures → null
     getTripRisk(tripId).catch(() => null),
   ]);
+
+  const route = routeEnvelope?.route ?? null;  // null when no route saved
+
 
   // getTripInsights doesn't carry a risk score directly — the dashboard
   // endpoint (live mode) is where that lives, and it's not meaningful to

@@ -278,6 +278,10 @@ async def publish_event(
 
     envelope = {"message": msg_dict, "exclude_user_id": exclude_user_id}
     if redis is not None and hasattr(redis, "publish"):
-        await redis.publish(trip_channel(str(trip_id)), json.dumps(envelope))
+        try:
+            await redis.publish(trip_channel(str(trip_id)), json.dumps(envelope))
+        except Exception as exc:
+            logger.warning("Redis publish failed for trip %s, falling back to local broadcast: %s", trip_id, exc)
+            await manager.broadcast_to_trip(str(trip_id), msg_dict, exclude_user_id=exclude_user_id)
     else:
         await manager.broadcast_to_trip(str(trip_id), msg_dict, exclude_user_id=exclude_user_id)

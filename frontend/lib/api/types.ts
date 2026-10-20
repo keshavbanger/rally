@@ -149,6 +149,12 @@ export interface ApiRoute {
   updated_at: string;
 }
 
+/** Envelope returned by GET /trips/{trip_id}/route (always HTTP 200). */
+export interface ApiRouteOrEmpty {
+  route: ApiRoute | null;
+  message: string | null;
+}
+
 export interface RouteMemberProgress {
   user_id: string;
   name: string | null;

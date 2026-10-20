@@ -147,6 +147,28 @@ def test_active_alerts_endpoint_works(mock_list, as_trip_member):
     assert response.json()[0]["status"] == "ACKNOWLEDGED"
 
 
+@patch("app.api.alerts.alerts_service.list_active_alerts")
+def test_active_alerts_empty_returns_200_with_empty_alerts_array(mock_list, as_trip_member):
+    mock_list.return_value = []
+    token = make_token(sub=DEFAULT_TEST_USER_ID)
+
+    response = client.get(URL_ACTIVE, headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json() == {"alerts": []}
+
+
+@patch("app.api.alerts.alerts_service.list_active_alerts")
+def test_active_alerts_none_returns_200_with_empty_alerts_array(mock_list, as_trip_member):
+    mock_list.return_value = None
+    token = make_token(sub=DEFAULT_TEST_USER_ID)
+
+    response = client.get(URL_ACTIVE, headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json() == {"alerts": []}
+
+
 def test_non_member_cannot_access_active_alerts(no_group_membership):
     token = make_token(sub=DEFAULT_TEST_USER_ID)
     response = client.get(URL_ACTIVE, headers={"Authorization": f"Bearer {token}"})

@@ -38,7 +38,7 @@ function TripSummaryContent() {
           if (cancelled) return;
           if (apiTrip) {
             const started = apiTrip.started_at ? new Date(apiTrip.started_at) : new Date(apiTrip.created_at);
-            const routeWaypoints = routeData?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
+            const routeWaypoints = routeData?.route?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
             const remoteSummary: TripSummary = {
               id: apiTrip.id,
               groupName: 'Rally Trip',
@@ -60,8 +60,8 @@ function TripSummaryContent() {
               safetyScore: apiTrip.safety_score ?? 100,
               riskLevel: 'LOW RISK',
               route: routeWaypoints,
-              destinationLat: routeData?.destination_latitude ?? 0,
-              destinationLng: routeData?.destination_longitude ?? 0,
+              destinationLat: routeData?.route?.destination_latitude ?? 0,
+              destinationLng: routeData?.route?.destination_longitude ?? 0,
               alertPoints: [],
               deviationPoint: null,
               keyEvents: [],

@@ -14,7 +14,7 @@ from app.models.enums import RouteStatus, TripStatus
 from app.models.route import Route
 from app.models.trip import Trip
 from app.route import service as route_service
-from app.schemas.route import RouteCreate, RouteMemberProgress, RouteProgressResponse, RouteResponse
+from app.schemas.route import RouteCreate, RouteMemberProgress, RouteOrEmpty, RouteProgressResponse, RouteResponse
 
 logger = logging.getLogger("rally.route")
 
@@ -46,13 +46,20 @@ def create_route_endpoint(
     return _serialize_route(route)
 
 
-@router.get("/trips/{trip_id}/route", response_model=RouteResponse)
+@router.get("/trips/{trip_id}/route", response_model=RouteOrEmpty)
 def get_route_endpoint(
     trip: Trip = Depends(require_trip_member),
     db: Session = Depends(get_db),
-):
-    route = _get_route_or_404(db, trip.id)
-    return _serialize_route(route)
+) -> RouteOrEmpty:
+    """Returns the trip's planned route wrapped in a RouteOrEmpty envelope.
+    Always returns HTTP 200 — when no route has been saved yet,
+    `route` is None and `message` explains why, so callers never need
+    to treat the no-route case as an error."""
+    route = route_service.get_route_by_trip(db, trip.id)
+    if route is None:
+        from app.schemas.route import _NO_ROUTE_MESSAGE
+        return RouteOrEmpty(route=None, message=_NO_ROUTE_MESSAGE)
+    return RouteOrEmpty(route=_serialize_route(route))
 
 
 @router.get("/trips/{trip_id}/route/progress", response_model=RouteProgressResponse)

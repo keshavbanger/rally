@@ -55,8 +55,13 @@ export interface ServerLocationUpdateMessage {
     speed: number | null;
     heading: number | null;
     recorded_at: string;
+    timestamp?: string | null;
     updated_at: string;
   };
+  user_id?: string;
+  latitude?: number;
+  longitude?: number;
+  timestamp?: string;
 }
 
 export interface ServerLocationAckMessage {

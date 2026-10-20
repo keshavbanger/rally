@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -83,13 +83,24 @@ def list_trip_alerts_endpoint(
     return [_serialize(a) for a in rows]
 
 
-@router.get("/trips/{trip_id}/alerts/active", response_model=List[AlertResponse])
+@router.get(
+    "/trips/{trip_id}/alerts/active",
+    response_model=Union[Dict[str, List[AlertResponse]], List[AlertResponse]],
+)
 def list_active_trip_alerts_endpoint(
     trip: Trip = Depends(require_trip_member),
     db: Session = Depends(get_db),
 ):
-    """ACTIVE or ACKNOWLEDGED (not yet resolved)."""
-    rows = alerts_service.list_active_alerts(db, trip.id)
+    """ACTIVE or ACKNOWLEDGED (not yet resolved).
+    Returns {"alerts": []} when no active alerts exist for the trip."""
+    try:
+        rows = alerts_service.list_active_alerts(db, trip.id)
+    except Exception:
+        logger.exception("Failed to query active alerts for trip %s", trip.id)
+        rows = []
+
+    if not rows:
+        return {"alerts": []}
     return [_serialize(a) for a in rows]
 
 

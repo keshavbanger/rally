@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -135,14 +135,16 @@ class ClientEnvelope(BaseModel):
 
 class LocationCreate(BaseModel):
     """Inbound GPS payload inside a location_update envelope (new handler).
-    No user_id / trip_id / group_id — those always come from the verified JWT
-    and the URL, never from the message body."""
+    Accepts latitude, longitude, and optional telemetry fields like timestamp."""
+    model_config = ConfigDict(extra="ignore")
+
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
     accuracy: Optional[float] = Field(None, ge=0)
     speed: Optional[float] = Field(None, ge=0)
     heading: Optional[float] = Field(None, ge=0, lt=360)
     recorded_at: Optional[datetime] = None
+    timestamp: Optional[Any] = None
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +170,14 @@ def build_location_update_event(
     user_id: Any,
     latitude: float,
     longitude: float,
-    accuracy: Optional[float],
-    speed: Optional[float],
-    heading: Optional[float],
+    accuracy: Optional[float] = None,
+    speed: Optional[float] = None,
+    heading: Optional[float] = None,
     recorded_at: str,
+    timestamp: Optional[str] = None,
     updated_at: Optional[str] = None,
 ) -> Dict[str, Any]:
+    ts = timestamp or recorded_at
     return {
         "type": "location_update",
         "data": {
@@ -186,6 +190,10 @@ def build_location_update_event(
             "recorded_at": recorded_at,
             "updated_at": updated_at if updated_at is not None else recorded_at,
         },
+        "user_id": str(user_id),
+        "latitude": latitude,
+        "longitude": longitude,
+        "timestamp": ts,
     }
 
 

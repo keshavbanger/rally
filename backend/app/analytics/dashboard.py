@@ -21,9 +21,11 @@ DB-only either way; weather and group ETA are live-only (both need a
 current location/speed a finished trip no longer has).
 """
 
+import logging
 import uuid
 from typing import List, Optional, Tuple
 
+import redis.exceptions
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
@@ -55,6 +57,8 @@ from app.schemas.analytics import (
 from app.schemas.risk import RiskScore
 from app.sos import service as sos_service
 from app.weather.service import WeatherInfo, WeatherService
+
+logger = logging.getLogger("rally.analytics.dashboard")
 
 
 def _pick_representative_progress(
@@ -95,9 +99,13 @@ def _risk_to_dashboard(risk: RiskScore) -> DashboardRisk:
 
 
 async def build_dashboard(db: Session, redis: Optional[Redis], trip: Trip, viewer_user_id: uuid.UUID) -> DashboardResponse:
-    if trip.status == TripStatus.ACTIVE:
-        return await _build_live_dashboard(db, redis, trip, viewer_user_id)
-    return _build_historical_dashboard(db, trip, viewer_user_id)
+    try:
+        if trip.status == TripStatus.ACTIVE:
+            return await _build_live_dashboard(db, redis, trip, viewer_user_id)
+        return _build_historical_dashboard(db, trip, viewer_user_id)
+    except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError) as exc:
+        logger.warning("Redis connection failure in build_dashboard for trip %s, falling back to PostgreSQL mode: %s", trip.id, exc)
+        return _build_historical_dashboard(db, trip, viewer_user_id)
 
 
 async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip, viewer_user_id: uuid.UUID) -> DashboardResponse:
@@ -106,16 +114,24 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
 
     # Redis being unreachable degrades this to whatever PostgreSQL alone
     # can answer, rather than failing the whole dashboard — every
-    # Redis-only field below simply becomes None instead.
+    # Redis-only field below safely falls back.
     computed = None
     if redis is not None:
-        computed = await intelligence_engine.compute_current_state(db, redis, trip.id, trip.group_id)
+        try:
+            computed = await intelligence_engine.compute_current_state(db, redis, trip.id, trip.group_id)
+        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+            logger.warning("Redis failure computing current state for dashboard (trip %s): %s", trip.id, exc)
+            computed = None
 
     route_progress_members: List[MemberRouteProgress] = []
     if redis is not None and route is not None and route.status == RouteStatus.ACTIVE:
-        route_progress_members, _group_fraction, _trip_arrived = await route_service.get_live_route_progress(
-            db, redis, trip, route
-        )
+        try:
+            route_progress_members, _group_fraction, _trip_arrived = await route_service.get_live_route_progress(
+                db, redis, trip, route
+            )
+        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+            logger.warning("Redis failure computing route progress for dashboard (trip %s): %s", trip.id, exc)
+            route_progress_members = []
     route_state_by_user = {m.user_id: m.route_state for m in route_progress_members}
     fraction_by_user = {m.user_id: m.match.route_fraction for m in route_progress_members if m.match}
 
@@ -157,10 +173,63 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
         moving_count = sum(1 for m in computed.members if m.movement_state == "MOVING")
         stopped_count = sum(1 for m in computed.members if m.movement_state == "STOPPED")
     else:
+        # Fallback to Supabase PostgreSQL when Redis is unreachable or computed is None
         group_members = queries.list_active_group_members(db, trip.group_id)
-        members = [DashboardMember(user_id=m["user_id"], name=m["name"]) for m in group_members]
+        latest_points_by_user = {}
+        if db is not None:
+            try:
+                latest_points_by_user = queries.fetch_location_points(db, trip.id)
+            except Exception as exc:
+                logger.warning("DB fallback fetch_location_points failed: %s", exc)
+
+        members = []
+        for m in group_members:
+            uid_str = str(m["user_id"])
+            user_points = latest_points_by_user.get(uid_str, [])
+            route_state = None
+            progress_percent = None
+            if route is not None and user_points:
+                try:
+                    match = route_analytics.match_last_point(route, user_points)
+                    if match is not None:
+                        thresholds = current_thresholds()
+                        confirmed_arrived = match.distance_remaining_meters <= thresholds.arrival_threshold_meters
+                        route_state = route_progress.classify_route_state(
+                            distance_from_route_meters=match.distance_from_route_meters,
+                            distance_remaining_meters=match.distance_remaining_meters,
+                            confirmed_arrived=confirmed_arrived,
+                            thresholds=thresholds,
+                        )
+                        progress_percent = round(match.route_fraction * 100, 1)
+                except Exception:
+                    pass
+
+            members.append(
+                DashboardMember(
+                    user_id=m["user_id"],
+                    name=m["name"],
+                    route_state=route_state,
+                    progress_percent=progress_percent,
+                )
+            )
         member_count = len(group_members)
         online_count = moving_count = stopped_count = None
+
+        # Fallback route progress from PostgreSQL points if route progress was not computed from Redis
+        if dashboard_route.progress_percent is None and route is not None and latest_points_by_user:
+            try:
+                completion_percent, distance_remaining, _arrived = route_analytics.compute_route_completion(
+                    route, latest_points_by_user, leader_id
+                )
+                dashboard_route = DashboardRoute(
+                    route_available=True,
+                    distance_meters=round(route.distance_meters),
+                    progress_percent=completion_percent,
+                    distance_remaining_meters=round(distance_remaining) if distance_remaining is not None else None,
+                    eta_seconds=None,
+                )
+            except Exception as exc:
+                logger.warning("DB fallback compute_route_completion failed: %s", exc)
 
     # --- Risk (Phase 12) — DB-only, plus the live online/member ratio
     # when we actually have it (never fabricated otherwise). ---
@@ -171,9 +240,14 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
     # function already computed; never re-queries anything. ---
     dashboard_eta = _build_dashboard_eta(representative, route_progress_members, speed_by_user, route)
 
-    # --- Weather (Phase 12) — the representative member's live
-    # location, if any; entirely optional, never blocks the dashboard. ---
-    dashboard_weather = await _build_dashboard_weather(redis, computed, leader_id)
+    # --- Weather (Phase 12) — optional, never blocks the dashboard. ---
+    dashboard_weather = DashboardWeather(weather_available=False)
+    if redis is not None:
+        try:
+            dashboard_weather = await _build_dashboard_weather(redis, computed, leader_id)
+        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+            logger.warning("Redis weather fetch failed for dashboard: %s", exc)
+            dashboard_weather = DashboardWeather(weather_available=False)
 
     unread_count = notification_service.get_unread_count(db, viewer_user_id)
 
@@ -246,8 +320,12 @@ async def _build_dashboard_weather(redis: Optional[Redis], computed, leader_id: 
     if location is None:
         return DashboardWeather(weather_available=False)
 
-    weather = await WeatherService.get_weather(redis, location[0], location[1])
-    return _weather_to_dashboard(weather)
+    try:
+        weather = await WeatherService.get_weather(redis, location[0], location[1])
+        return _weather_to_dashboard(weather)
+    except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+        logger.warning("WeatherService.get_weather failed: %s", exc)
+        return DashboardWeather(weather_available=False)
 
 
 def _build_historical_dashboard(db: Session, trip: Trip, viewer_user_id: uuid.UUID) -> DashboardResponse:

@@ -13,6 +13,7 @@ without changing this function's external contract (still returns an ack
 either way).
 """
 
+from datetime import datetime, timezone
 import json
 import logging
 import time
@@ -148,6 +149,19 @@ async def handle_client_message(
 
     try:
         payload = json.loads(raw)
+    except Exception:
+        return build_error(ErrorCode.INVALID_MESSAGE, "Message must be valid JSON with a 'type' field.")
+
+    if not isinstance(payload, dict):
+        return build_error(ErrorCode.INVALID_MESSAGE, "Message must be valid JSON with a 'type' field.")
+
+    # Support incoming location update payloads sent directly or with flat structure
+    if "type" not in payload and "latitude" in payload and "longitude" in payload:
+        payload = {"type": "location_update", "data": payload}
+    elif payload.get("type") == "location_update" and ("data" not in payload or not payload["data"]):
+        payload["data"] = {k: v for k, v in payload.items() if k != "type"}
+
+    try:
         envelope = ClientEnvelope.model_validate(payload)
     except Exception:
         return build_error(ErrorCode.INVALID_MESSAGE, "Message must be valid JSON with a 'type' field.")
@@ -177,11 +191,25 @@ async def _handle_location_update(
         return build_error(ErrorCode.RATE_LIMITED, "Sending location updates too fast — please slow down.")
 
     try:
-        # Client never supplies user_id/trip_id/group_id — LocationCreate
-        # has no such fields, same trust boundary as the REST endpoint.
         data = LocationCreate.model_validate(envelope.data or {})
     except ValidationError:
         return build_error(ErrorCode.INVALID_LOCATION, "Invalid GPS coordinates.")
+
+    from datetime import timezone
+    if data.recorded_at is None:
+        if data.timestamp is not None:
+            if isinstance(data.timestamp, (int, float)):
+                ts = data.timestamp / 1000.0 if data.timestamp > 1e11 else float(data.timestamp)
+                data.recorded_at = datetime.fromtimestamp(ts, tz=timezone.utc)
+            elif isinstance(data.timestamp, str):
+                try:
+                    data.recorded_at = datetime.fromisoformat(data.timestamp.replace("Z", "+00:00"))
+                except Exception:
+                    data.recorded_at = datetime.now(timezone.utc)
+            elif isinstance(data.timestamp, datetime):
+                data.recorded_at = data.timestamp
+        else:
+            data.recorded_at = datetime.now(timezone.utc)
 
     try:
         location = await run_in_threadpool(_persist_location, db, ctx.trip_id, ctx.user_id, data)
@@ -253,12 +281,22 @@ def _load_active_members(db: Session, group_id: uuid.UUID) -> List[dict]:
 
 async def build_trip_state_snapshot(db: Session, redis: Redis, ctx: TripConnectionContext) -> dict:
     """Sent once, right after a client connects — see the WEBSOCKET
-    CONNECTION FLOW step "send current live state" in the router."""
+    CONNECTION FLOW step "send current live state" in the router.
+    Redis failures fall back to empty live state (no locations, all
+    members OFFLINE) so the dashboard still loads from Postgres data."""
     members = await run_in_threadpool(_load_active_members, db, ctx.group_id)
     user_ids = [m["user_id"] for m in members]
 
-    locations = await live_state_service.get_live_locations(redis, ctx.trip_id, user_ids)
-    online_status = await presence_service.get_online_status(redis, ctx.trip_id, user_ids)
+    try:
+        locations = await live_state_service.get_live_locations(redis, ctx.trip_id, user_ids)
+        online_status = await presence_service.get_online_status(redis, ctx.trip_id, user_ids)
+    except Exception:
+        logger.warning(
+            "Redis unavailable building trip state snapshot for trip %s — returning empty live state",
+            ctx.trip_id,
+        )
+        locations = {}
+        online_status = {}
 
     snapshot = []
     for member in members:
@@ -280,3 +318,4 @@ async def build_trip_state_snapshot(db: Session, redis: Redis, ctx: TripConnecti
         )
 
     return build_trip_state(ctx.trip_id, snapshot)
+

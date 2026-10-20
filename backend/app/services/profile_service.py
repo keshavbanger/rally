@@ -36,16 +36,8 @@ def get_or_create_profile(
     """
     profile = get_profile(db, user_id)
     if profile is not None:
-        updated = False
-        if full_name_hint and profile.full_name != full_name_hint:
-            profile.full_name = full_name_hint
-            updated = True
-        if avatar_url_hint and profile.avatar_url != avatar_url_hint:
-            profile.avatar_url = avatar_url_hint
-            updated = True
-        if updated:
-            db.commit()
-            db.refresh(profile)
+        # Hints are only used at creation time — never overwrite an existing
+        # profile's fields on a subsequent call (see docstring).
         return profile
 
     profile = Profile(id=uuid.UUID(str(user_id)), full_name=full_name_hint, avatar_url=avatar_url_hint)

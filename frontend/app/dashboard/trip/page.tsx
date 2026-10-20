@@ -105,7 +105,10 @@ function TripContent({ group }: { group: Group }) {
             )}
             <LiveMap 
               group={group} 
+              route={group.route && group.route.length > 0 ? group.route : null}
               routeAlternatives={group.route && group.route.length > 0 ? [{ id: 'active', coordinates: group.route, selected: true }] : undefined}
+              showNoRoutePrompt={true}
+              onSetDestination={() => router.push('/dashboard/route')}
             />
           </div>
 

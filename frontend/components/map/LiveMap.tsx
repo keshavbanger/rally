@@ -11,19 +11,22 @@
  * clear, user-friendly "configure your API key" banner instead of crashing.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   APIProvider,
-  Map,
+  Map as GoogleMap,
   AdvancedMarker,
   Pin,
   useMap,
   InfoWindow,
 } from '@vis.gl/react-google-maps';
-import { LocateFixed, Plus, Minus, Maximize, Route as RouteIcon, AlertTriangle } from 'lucide-react';
+import { LocateFixed, Plus, Minus, Maximize, Route as RouteIcon, AlertTriangle, MapPin } from 'lucide-react';
 import type { AlertItem, Group } from '@/lib/mock/types';
 import { STATUS_STYLE } from '@/components/dashboard/status';
 import { hasGoogleMapsKey, GOOGLE_MAPS_API_KEY } from '@/lib/services/googleMaps';
+import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
+import type { ConnectionStatus, ServerMessage } from '@/lib/ws/types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -37,9 +40,13 @@ interface LiveMapProps {
   group?: Group;
   showStart?: boolean;
   alerts?: AlertItem[];
+  route?: Array<{ lat: number; lng: number }> | Array<[number, number]> | null;
   routeAlternatives?: RouteAlt[];
   onRouteSelect?: (id: string) => void;
   customDestination?: { lat: number; lng: number; name: string };
+  /** When true or when route is null/absent, shows a prompt/button ("Set Destination") */
+  showNoRoutePrompt?: boolean;
+  onSetDestination?: () => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -63,17 +70,142 @@ function MapContent({
   group,
   showStart,
   alerts,
+  route,
   routeAlternatives,
   onRouteSelect,
   customDestination,
   deviceLoc,
+  showNoRoutePrompt,
+  onSetDestination,
 }: LiveMapProps & { deviceLoc: google.maps.LatLngLiteral | null }) {
+  const router = useRouter();
   const map = useMap();
   const [showRoute, setShowRoute] = useState(true);
   const [activePopup, setActivePopup] = useState<string | null>(null);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
 
-  const validMembers = group ? group.members.filter((m) => m.lat !== 0 && m.lng !== 0) : [];
+  // ── Real-time member locations & socket connection ────────────────────────
+  const [livePositions, setLivePositions] = useState<
+    Map<string, { lat: number; lng: number; speedKmh?: number; headingDeg?: number; updatedAt: number }>
+  >(new Map());
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('DISCONNECTED');
+
+  useEffect(() => {
+    const unsubStatus = rallyGroupService.subscribeConnectionStatus((status) => {
+      setConnectionStatus(status);
+    });
+
+    const unsubMessages = rallyGroupService.subscribeMessages((msg: ServerMessage) => {
+      try {
+        if (msg.type === 'location_update') {
+          const payload: any = (msg as any).data || msg;
+          const userId = payload.user_id || payload.userId;
+          if (!userId) return;
+
+          const lat = typeof payload.latitude === 'number' ? payload.latitude : parseFloat(payload.latitude);
+          const lng = typeof payload.longitude === 'number' ? payload.longitude : parseFloat(payload.longitude);
+
+          // Gracefully validate coordinates (ignore NaN, Inf, Null Island (0,0), out of bounds)
+          if (
+            !Number.isFinite(lat) ||
+            !Number.isFinite(lng) ||
+            (lat === 0 && lng === 0) ||
+            lat < -90 ||
+            lat > 90 ||
+            lng < -180 ||
+            lng > 180
+          ) {
+            return;
+          }
+
+          const rawSpeed = payload.speed != null ? Number(payload.speed) : undefined;
+          const rawHeading = payload.heading != null ? Number(payload.heading) : undefined;
+
+          setLivePositions((prev) => {
+            const next = new Map(prev);
+            next.set(userId, {
+              lat,
+              lng,
+              speedKmh: rawSpeed != null && Number.isFinite(rawSpeed) ? Math.round(rawSpeed * 3.6) : undefined,
+              headingDeg: rawHeading != null && Number.isFinite(rawHeading) ? rawHeading : undefined,
+              updatedAt: Date.now(),
+            });
+            return next;
+          });
+        }
+      } catch (err) {
+        console.warn('LiveMap: Failed to parse incoming WebSocket location update:', err);
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubMessages();
+    };
+  }, []);
+
+  // Consolidate route alternatives from explicit alternatives, direct route prop, or group route
+  const effectiveRouteAlts = useMemo<RouteAlt[]>(() => {
+    if (routeAlternatives && routeAlternatives.length > 0) {
+      return routeAlternatives;
+    }
+    if (route && Array.isArray(route) && route.length > 0) {
+      const coords: google.maps.LatLngLiteral[] = route.map((pt: any) => {
+        if (Array.isArray(pt)) {
+          return { lat: pt[0], lng: pt[1] };
+        }
+        return { lat: pt.lat, lng: pt.lng };
+      });
+      return [{ id: 'active', coordinates: coords, selected: true }];
+    }
+    if (group?.route && group.route.length > 0) {
+      return [{ id: 'active', coordinates: group.route, selected: true }];
+    }
+    return [];
+  }, [routeAlternatives, route, group?.route]);
+
+  const hasRoute = effectiveRouteAlts.length > 0;
+  const isRouteNull = route === null;
+  const shouldShowNoRoutePrompt = isRouteNull || Boolean(showNoRoutePrompt && !hasRoute);
+
+  const handleSetDestination = () => {
+    if (onSetDestination) {
+      onSetDestination();
+    } else {
+      router.push('/dashboard/route');
+    }
+  };
+
+  // Merge live WebSocket positions onto group members and filter out invalid/uninitialized markers
+  const effectiveMembers = useMemo(() => {
+    if (!group?.members) return [];
+    return group.members
+      .map((m) => {
+        const live = livePositions.get(m.id);
+        if (live) {
+          return {
+            ...m,
+            lat: live.lat,
+            lng: live.lng,
+            speedKmh: live.speedKmh ?? m.speedKmh,
+            headingDeg: live.headingDeg ?? m.headingDeg,
+          };
+        }
+        return m;
+      })
+      .filter(
+        (m) =>
+          Number.isFinite(m.lat) &&
+          Number.isFinite(m.lng) &&
+          (m.lat !== 0 || m.lng !== 0) &&
+          m.lat >= -90 &&
+          m.lat <= 90 &&
+          m.lng >= -180 &&
+          m.lng <= 180
+      );
+  }, [group?.members, livePositions]);
+
+  const validMembers = effectiveMembers;
 
   const destLat = customDestination ? customDestination.lat : (group?.destinationLat ?? 0);
   const destLng = customDestination ? customDestination.lng : (group?.destinationLng ?? 0);
@@ -101,9 +233,9 @@ function MapContent({
     polylinesRef.current.forEach((p) => p.setMap(null));
     polylinesRef.current = [];
 
-    if (!showRoute || !routeAlternatives?.length) return;
+    if (!showRoute || !effectiveRouteAlts.length) return;
 
-    routeAlternatives.forEach((alt) => {
+    effectiveRouteAlts.forEach((alt) => {
       const line = new google.maps.Polyline({
         path:         alt.coordinates,
         strokeColor:  alt.selected ? '#19BFFF' : '#6B7280',
@@ -121,18 +253,18 @@ function MapContent({
       polylinesRef.current.forEach((p) => p.setMap(null));
       polylinesRef.current = [];
     };
-  }, [map, routeAlternatives, showRoute, onRouteSelect]);
+  }, [map, effectiveRouteAlts, showRoute, onRouteSelect]);
 
   // ── Fit bounds whenever routes change ────────────────────────────────────
 
   useEffect(() => {
-    if (!map || !routeAlternatives?.length) return;
+    if (!map || !effectiveRouteAlts.length) return;
     const bounds = new google.maps.LatLngBounds();
-    routeAlternatives.forEach((alt) => alt.coordinates.forEach((c) => bounds.extend(c)));
+    effectiveRouteAlts.forEach((alt) => alt.coordinates.forEach((c) => bounds.extend(c)));
     if (deviceLoc) bounds.extend(deviceLoc);
     if (hasDestination) bounds.extend({ lat: destLat, lng: destLng });
     if (!bounds.isEmpty()) map.fitBounds(bounds, 60);
-  }, [map, routeAlternatives]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, effectiveRouteAlts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fit bounds on first mount if no routes ────────────────────────────────
 
@@ -154,7 +286,7 @@ function MapContent({
 
   const handleLocateMe = useCallback(() => {
     if (!map) return;
-    const me = group?.members.find((m) => m.isCurrentUser);
+    const me = effectiveMembers.find((m) => m.isCurrentUser);
     if (me && me.lat !== 0 && me.lng !== 0) {
       map.panTo({ lat: me.lat, lng: me.lng });
       map.setZoom(16);
@@ -162,7 +294,7 @@ function MapContent({
       map.panTo(deviceLoc);
       map.setZoom(16);
     }
-  }, [map, group, deviceLoc]);
+  }, [map, effectiveMembers, deviceLoc]);
 
   const handleFitGroup = useCallback(() => {
     if (!map) return;
@@ -176,9 +308,10 @@ function MapContent({
   }, [map, validMembers, hasDestination, destLat, destLng, deviceLoc, routeAlternatives, center]);
 
   // Show current-user marker (live device location when no group member coords)
-  const currentUserMarkers: { id: string; lat: number; lng: number; name: string; status: string; isCurrentUser: boolean }[] =
-    group
-      ? group.members.filter((m) => m.isCurrentUser && m.lat !== 0 && m.lng !== 0)
+  const currentMember = effectiveMembers.find((m) => m.isCurrentUser);
+  const currentUserMarkers: { id: string; lat: number; lng: number; name: string; status: string; isCurrentUser: boolean; speedKmh?: number; headingDeg?: number }[] =
+    currentMember
+      ? [currentMember]
       : deviceLoc
       ? [{ id: 'me', lat: deviceLoc.lat, lng: deviceLoc.lng, name: 'You', status: 'safe', isCurrentUser: true }]
       : [];
@@ -186,7 +319,7 @@ function MapContent({
   return (
     <>
       {/* ── Map ─────────────────────────────────────────────────────────── */}
-      <Map
+      <GoogleMap
         defaultCenter={center}
         defaultZoom={15}
         mapId="rally-live-map"
@@ -195,6 +328,14 @@ function MapContent({
         style={{ width: '100%', height: '100%' }}
         colorScheme="DARK"
       />
+
+      {/* ── Disconnected / Reconnecting notification banner ──────────────── */}
+      {connectionStatus === 'RECONNECTING' && (
+        <div className="absolute top-4 left-4 z-[1000] px-3 py-1.5 rounded-full bg-[#0A0A0A]/90 border border-amber-500/40 text-amber-300 text-xs font-medium flex items-center gap-2 backdrop-blur shadow-md pointer-events-none">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <span>Reconnecting live tracking...</span>
+        </div>
+      )}
 
       {/* ── Destination marker ───────────────────────────────────────────── */}
       {hasDestination && (
@@ -230,7 +371,7 @@ function MapContent({
 
       {/* ── Alert markers ───────────────────────────────────────────────── */}
       {alerts?.map((a) => {
-        const m = group?.members.find((mem) => mem.id === a.memberId);
+        const m = effectiveMembers.find((mem) => mem.id === a.memberId);
         if (!m) return null;
         return (
           <AdvancedMarker
@@ -250,7 +391,7 @@ function MapContent({
       })}
 
       {/* ── Member markers ───────────────────────────────────────────────── */}
-      {[...currentUserMarkers, ...(group ? group.members.filter((m) => !m.isCurrentUser && m.lat !== 0 && m.lng !== 0) : [])].map((m: any) => {
+      {[...currentUserMarkers, ...effectiveMembers.filter((m) => !m.isCurrentUser)].map((m: any) => {
         const style = STATUS_STYLE[m.status as keyof typeof STATUS_STYLE] || STATUS_STYLE.safe;
         return (
           <AdvancedMarker
@@ -258,7 +399,17 @@ function MapContent({
             position={{ lat: m.lat, lng: m.lng }}
             onClick={() => setActivePopup(`member-${m.id}`)}
           >
-            <div style={{ position: 'relative', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div
+              style={{
+                position: 'relative',
+                width: 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
+              }}
+            >
               <div style={{ position: 'absolute', width: '100%', height: '100%', borderRadius: '50%', background: style.hex, opacity: 0.3 }} />
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0A0A0A', border: `2px solid ${style.hex}`, color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 10px ${style.hex}` }}>
                 {m.name.charAt(0)}
@@ -280,6 +431,22 @@ function MapContent({
           </AdvancedMarker>
         );
       })}
+
+      {/* ── No-route prompt / button ─────────────────────────────────────── */}
+      {shouldShowNoRoutePrompt && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSetDestination}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#0A0A0A]/95 hover:bg-[#1A1A1A] active:scale-95 backdrop-blur border border-white/20 text-xs font-semibold text-white shadow-xl transition-all cursor-pointer pointer-events-auto"
+            title="Set Destination"
+            aria-label="Set Destination"
+          >
+            <MapPin className="w-3.5 h-3.5 text-rally-blue shrink-0" />
+            <span>Set Destination</span>
+          </button>
+        </div>
+      )}
 
       {/* ── Floating map controls ───────────────────────────────────────── */}
       <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">

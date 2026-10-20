@@ -153,21 +153,29 @@ def test_create_route_rejects_fewer_than_two_coordinates(as_trip_leader):
 
 
 @patch("app.api.route.route_service.get_route_by_trip")
-def test_get_route_returns_404_when_none_planned(mock_get, as_trip_member):
+def test_get_route_returns_200_with_null_when_no_route_planned(mock_get, as_trip_member):
+    """GET /trips/{id}/route now always returns 200 — when there is no route
+    yet, `route` is null and `message` explains why (never a 404)."""
     mock_get.return_value = None
     token = make_token(sub=DEFAULT_TEST_USER_ID)
     response = client.get(f"{API}/trips/{TRIP_ID}/route", headers={"Authorization": f"Bearer {token}"})
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "ROUTE_NOT_FOUND"
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] is None
+    assert "message" in body and body["message"]  # non-empty message
 
 
 @patch("app.api.route.route_service.get_route_by_trip")
-def test_get_route_returns_existing_route(mock_get, as_trip_member):
+def test_get_route_returns_existing_route_wrapped_in_envelope(mock_get, as_trip_member):
+    """When a route exists, it's wrapped in the envelope: {route: {...}}."""
     mock_get.return_value = make_mock_route()
     token = make_token(sub=DEFAULT_TEST_USER_ID)
     response = client.get(f"{API}/trips/{TRIP_ID}/route", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
-    assert response.json()["id"] == str(ROUTE_ID)
+    body = response.json()
+    assert body["route"]["id"] == str(ROUTE_ID)
+    assert body["route"]["status"] == "PLANNED"
+    assert body["message"] is None
 
 
 def test_unauthenticated_user_cannot_read_route():
