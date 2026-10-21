@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Compass, Loader2, MapPin, Route as RouteIcon, Shield } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/hooks/useGroup';
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import { supabase } from '@/lib/supabase/client';
@@ -23,16 +23,20 @@ export default function TripHistoryPage() {
   useEffect(() => {
     let cancelled = false;
     async function loadTrips() {
+      // Local localStorage trips are the richest — they were saved by
+      // RallyGroupService.endTrip() with full analytics + insights.
+      // Start with them and then append any backend-only items not yet local.
       const local = getTripHistory();
+
       try {
         // Try FastAPI GET /trips/history first, falling back to /users/me/trips
         const remote = await tripsApi.getTripsHistory({ limit: 50 }).catch(() => tripsApi.listMyTripHistory({ limit: 50 }));
         if (cancelled) return;
 
-        let items = remote?.items;
+        let remoteItems = remote?.items;
 
         // Fallback directly to Supabase if backend returned no items or empty
-        if (!items || items.length === 0) {
+        if (!remoteItems || remoteItems.length === 0) {
           try {
             const { data: supaTrips } = await supabase
               .from('trips')
@@ -42,7 +46,7 @@ export default function TripHistoryPage() {
               .limit(50);
 
             if (supaTrips && supaTrips.length > 0) {
-              items = supaTrips.map((st) => ({
+              remoteItems = supaTrips.map((st) => ({
                 trip_id: st.id,
                 name: st.destination_name,
                 destination_name: st.destination_name,
@@ -61,71 +65,71 @@ export default function TripHistoryPage() {
           }
         }
 
-        if (items && items.length > 0) {
-          const remoteMapped: TripSummary[] = items.map((t) => {
-            const started = t.started_at ? new Date(t.started_at) : new Date();
-            const distanceKm = t.distance != null
-              ? Number(t.distance.toFixed(1))
-              : (t.distance_meters != null ? Number((t.distance_meters / 1000).toFixed(1)) : 0);
-            const durationMin = t.duration != null
-              ? t.duration
-              : ((t.started_at && t.ended_at)
-                  ? Math.round((new Date(t.ended_at).getTime() - new Date(t.started_at).getTime()) / 60000)
-                  : 0);
+        if (remoteItems?.length) {
+          const localIds = new Set(local.map((t) => t.id));
 
-            const routeWaypoints = t.route?.coordinates?.map(([lng, lat]: number[]) => ({ lat, lng })) || [];
-            const destName = t.destination_name || t.name || (t.route?.name) || 'Completed Destination';
+          // Map backend items that aren't already in local storage
+          const backendOnly: TripSummary[] = remoteItems
+            .filter((t) => !localIds.has(t.trip_id))
+            .map((t) => {
+              const started = t.started_at ? new Date(t.started_at) : new Date();
+              const distanceKm = t.distance != null
+                ? Number(t.distance.toFixed(1))
+                : (t.distance_meters != null ? Number((t.distance_meters / 1000).toFixed(1)) : null);
+              const durationMin = t.duration != null
+                ? t.duration
+                : ((t.started_at && t.ended_at)
+                    ? Math.round((new Date(t.ended_at).getTime() - new Date(t.started_at).getTime()) / 60000)
+                    : null);
+              const routeWaypoints = t.route?.coordinates?.map(([lng, lat]: number[]) => ({ lat, lng })) || [];
+              const destName = t.destination_name || t.name || (t.route?.name) || 'Destination';
 
-            return {
-              id: String(t.trip_id),
-              groupName: t.name || 'Rally Trip',
-              destination: destName,
-              date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-              completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
-              distanceKm,
-              durationMin,
-              membersCount: t.member_count || 1,
-              alertsCount: 0,
-              routeDeviations: null,
-              separationEvents: null,
-              unexpectedStops: null,
-              sosCount: null,
-              safetyScore: t.safety_score ?? 100,
-              riskLevel: (t.safety_score ?? 100) >= 80 ? 'LOW RISK' : 'MEDIUM RISK',
-              route: routeWaypoints,
-              destinationLat: t.route?.destination_latitude ?? 0,
-              destinationLng: t.route?.destination_longitude ?? 0,
-              alertPoints: [],
-              deviationPoint: null,
-              keyEvents: [],
-              insights: [],
-              // preserve status and route flag for display/filter
-              _status: t.status,
-              _hasRoute: !!t.route || routeWaypoints.length > 0,
-            } as TripSummary & { _status: string; _hasRoute?: boolean };
-          });
+              return {
+                id: String(t.trip_id),
+                groupName: t.name || 'Rally Trip',
+                destination: destName,
+                date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
+                distanceKm,
+                durationMin,
+                membersCount: t.member_count || 1,
+                alertsCount: null,
+                routeDeviations: null,
+                separationEvents: null,
+                unexpectedStops: null,
+                sosCount: null,
+                safetyScore: t.safety_score ?? null,
+                riskLevel: t.safety_score != null ? ((t.safety_score >= 80 ? 'LOW RISK' : 'MEDIUM RISK')) : null,
+                route: routeWaypoints,
+                destinationLat: t.route?.destination_latitude ?? 0,
+                destinationLng: t.route?.destination_longitude ?? 0,
+                alertPoints: [],
+                deviationPoint: null,
+                keyEvents: [],
+                insights: [],
+                // preserve status and route flag for display/filter
+                _status: t.status,
+                _hasRoute: !!t.route || routeWaypoints.length > 0,
+              } as TripSummary & { _status: string; _hasRoute?: boolean };
+            });
 
-          const merged = [...remoteMapped];
-          for (const loc of local) {
-            if (!merged.some((m) => m.id === loc.id)) {
-              merged.push(loc);
-            }
-          }
+          // Local-first: rich summaries take priority, backend fills the gaps
+          const merged = [...local, ...backendOnly].sort((a, b) => b.completedAt - a.completedAt);
           setAllTrips(merged);
           return;
         }
       } catch (err) {
         console.warn('Could not fetch remote trip history, falling back to local:', err);
       }
+
       if (!cancelled) {
         setAllTrips(local);
       }
     }
     loadTrips();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
+
 
   if (allTrips === null) {
     return (
@@ -213,7 +217,7 @@ export default function TripHistoryPage() {
             </div>
             <div>
               <p className="text-base font-semibold text-foreground">No trips yet</p>
-              <p className="text-sm text-muted-foreground mt-1">Complete your first RALLY trip<br/>to see your journey history here.</p>
+              <p className="text-sm text-muted-foreground mt-1">Complete your first RALLY trip<br />to see your journey history here.</p>
             </div>
             <Link
               href="/dashboard/route"
@@ -283,7 +287,7 @@ export default function TripHistoryPage() {
                       <span>·</span>
                       <span>{trip.membersCount} members</span>
                     </div>
-                    
+
                     <Link
                       href={`/dashboard/history/${trip.id}`}
                       className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold hover:bg-white/10 transition-colors shrink-0"

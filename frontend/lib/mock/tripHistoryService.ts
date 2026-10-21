@@ -137,3 +137,15 @@ export function recordTrip(group: Group): TripSummary {
   write([summary, ...history]);
   return summary;
 }
+
+/**
+ * Persist a pre-built TripSummary that was assembled by RallyGroupService
+ * (which has access to backend analytics). This is the primary persistence
+ * path for real trips ended via the live trip page.
+ * De-duplicates by id so calling twice is safe.
+ */
+export function saveTripSummary(summary: TripSummary): void {
+  const history = readHistory();
+  const withoutOld = history.filter((t) => t.id !== summary.id);
+  write([summary, ...withoutOld]);
+}

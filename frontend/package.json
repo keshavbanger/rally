@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
+    "@maplibre/maplibre-gl-geocoder": "^1.9.4",
     "@rally/shared": "*",
     "@rally/types": "*",
     "@supabase/supabase-js": "^2.112.4",
@@ -20,6 +21,7 @@
     "idb": "^8.0.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.350.0",
+    "maplibre-gl": "^6.15.0",
     "next": "^14.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
