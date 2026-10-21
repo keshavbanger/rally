@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Compass, Loader2 } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/hooks/useGroup';
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import type { TripSummary } from '@/lib/mock/types';
@@ -22,60 +22,69 @@ export default function TripHistoryPage() {
   useEffect(() => {
     let cancelled = false;
     async function loadTrips() {
+      // Local localStorage trips are the richest — they were saved by
+      // RallyGroupService.endTrip() with full analytics + insights.
+      // Start with them and then append any backend-only items not yet local.
       const local = getTripHistory();
+
       try {
         const remote = await tripsApi.listMyTripHistory({ limit: 50 });
         if (cancelled) return;
-        if (remote && remote.items && remote.items.length > 0) {
-          const remoteMapped: TripSummary[] = remote.items.map((t) => {
-            const started = t.started_at ? new Date(t.started_at) : new Date();
-            return {
-              id: t.trip_id,
-              groupName: t.name || 'Rally Trip',
-              destination: (t as any).destination_name || 'Destination',
-              date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-              completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
-              distanceKm: (t as any).distance ? Number(((t as any).distance / 1000).toFixed(1)) : 0,
-              durationMin: (t as any).duration ? Math.round((t as any).duration / 60) : 0,
-              membersCount: (t as any).member_count || 1,
-              alertsCount: (t as any).alerts_count ?? 0,
-              routeDeviations: null,
-              separationEvents: null,
-              unexpectedStops: null,
-              sosCount: null,
-              safetyScore: (t as any).safety_score ?? 100,
-              riskLevel: 'LOW RISK',
-              route: [],
-              destinationLat: 0,
-              destinationLng: 0,
-              alertPoints: [],
-              deviationPoint: null,
-              keyEvents: [],
-              insights: [],
-            };
-          });
 
-          const merged = [...remoteMapped];
-          for (const loc of local) {
-            if (!merged.some((m) => m.id === loc.id)) {
-              merged.push(loc);
-            }
-          }
+        if (remote?.items?.length) {
+          const localIds = new Set(local.map((t) => t.id));
+
+          // Map backend items that aren't already in local storage
+          const backendOnly: TripSummary[] = remote.items
+            .filter((t) => !localIds.has(t.trip_id))
+            .map((t) => {
+              const started = t.started_at ? new Date(t.started_at) : new Date();
+              const distKm = t.distance_meters != null
+                ? Number((t.distance_meters / 1000).toFixed(1))
+                : null;
+              return {
+                id: t.trip_id,
+                groupName: t.name || 'Rally Trip',
+                destination: (t as any).destination_name || 'Destination',
+                date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
+                distanceKm: distKm,
+                durationMin: null,
+                membersCount: t.member_count || 1,
+                alertsCount: null,
+                routeDeviations: null,
+                separationEvents: null,
+                unexpectedStops: null,
+                sosCount: null,
+                safetyScore: null,
+                riskLevel: null,
+                route: [],
+                destinationLat: 0,
+                destinationLng: 0,
+                alertPoints: [],
+                deviationPoint: null,
+                keyEvents: [],
+                insights: [],
+              } as TripSummary;
+            });
+
+          // Local-first: rich summaries take priority, backend fills the gaps
+          const merged = [...local, ...backendOnly].sort((a, b) => b.completedAt - a.completedAt);
           setAllTrips(merged);
           return;
         }
       } catch (err) {
         console.warn('Could not fetch remote trip history, falling back to local:', err);
       }
+
       if (!cancelled) {
         setAllTrips(local);
       }
     }
     loadTrips();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
+
 
   if (allTrips === null) {
     return (

@@ -58,18 +58,25 @@ export interface RouteOption {
  */
 export async function calculateGoogleRoute(
   origin: LatLng,
-  destination: LatLng
+  destination: LatLng,
+  intermediates?: LatLng[]
 ): Promise<RouteOption[]> {
   requireGoogleMapsKey();
 
-  const body = {
+  const body: any = {
     origin:      { location: { latLng: { latitude: origin.lat,      longitude: origin.lng      } } },
     destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
     travelMode:  'DRIVE',
     computeAlternativeRoutes: true,
     routeModifiers: { avoidTolls: false, avoidHighways: false },
-    polylineEncoding: 'GEO_JSON_WKT',
+    polylineEncoding: 'ENCODED_POLYLINE',
   };
+
+  if (intermediates && intermediates.length > 0) {
+    body.intermediates = intermediates.map((p) => ({
+      location: { latLng: { latitude: p.lat, longitude: p.lng } },
+    }));
+  }
 
   const res = await fetch(
     'https://routes.googleapis.com/directions/v2:computeRoutes',

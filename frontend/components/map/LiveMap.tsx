@@ -55,17 +55,12 @@ function useDeviceLocation() {
   const [loc, setLoc] = useState<google.maps.LatLngLiteral | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined' || !navigator.geolocation) return;
-    let active = true;
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        if (active) setLoc({ lat: p.coords.latitude, lng: p.coords.longitude });
-      },
+    const watchId = navigator.geolocation.watchPosition(
+      (p) => setLoc({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {},
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
-    return () => {
-      active = false;
-    };
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
   return loc;
 }
@@ -297,6 +292,21 @@ function MapContent({
     }
   }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Auto-pan to device location the first time GPS resolves ──────────────
+
+  const didCentreRef = useRef(false);
+  useEffect(() => {
+    if (!map || !deviceLoc || didCentreRef.current) return;
+    // Only do this if there are no group members with live positions yet,
+    // so we don't override a multi-member bounds fit.
+    const hasLiveMembers = validMembers.some((m) => m.lat !== 0 && m.lng !== 0);
+    if (!hasLiveMembers) {
+      map.panTo(deviceLoc);
+      map.setZoom(16);
+      didCentreRef.current = true;
+    }
+  }, [map, deviceLoc, validMembers]);
+
   // ── Control handlers ─────────────────────────────────────────────────────
 
   const handleLocateMe = useCallback(() => {
@@ -322,14 +332,24 @@ function MapContent({
     else { map.setCenter(center); map.setZoom(15); }
   }, [map, validMembers, hasDestination, destLat, destLng, deviceLoc, routeAlternatives, center]);
 
-  // Show current-user marker (live device location when no group member coords)
+  // Show current-user marker
   const currentMember = effectiveMembers.find((m) => m.isCurrentUser);
-  const currentUserMarkers: { id: string; lat: number; lng: number; name: string; status: string; isCurrentUser: boolean; speedKmh?: number; headingDeg?: number }[] =
-    currentMember
-      ? [currentMember]
-      : deviceLoc
-      ? [{ id: 'me', lat: deviceLoc.lat, lng: deviceLoc.lng, name: 'You', status: 'safe', isCurrentUser: true }]
-      : [];
+  const currentUserMarkers: { id: string; lat: number; lng: number; name: string; status: string; isCurrentUser: boolean; speedKmh?: number; headingDeg?: number }[] = (() => {
+    if (currentMember && currentMember.lat !== 0 && currentMember.lng !== 0) {
+      return [currentMember];
+    }
+    if (deviceLoc) {
+      return [{
+        id: currentMember?.id ?? 'me',
+        lat: deviceLoc.lat,
+        lng: deviceLoc.lng,
+        name: currentMember?.name ?? 'You',
+        status: 'safe',
+        isCurrentUser: true,
+      }];
+    }
+    return [];
+  })();
 
   return (
     <>
@@ -408,6 +428,54 @@ function MapContent({
       {/* ── Member markers ───────────────────────────────────────────────── */}
       {[...currentUserMarkers, ...effectiveMembers.filter((m) => !m.isCurrentUser)].map((m: any) => {
         const style = STATUS_STYLE[m.status as keyof typeof STATUS_STYLE] || STATUS_STYLE.safe;
+        const initial = (m.name || 'Y').charAt(0).toUpperCase();
+        if (m.isCurrentUser) {
+          // Distinct pulsing blue marker for the current user
+          return (
+            <AdvancedMarker
+              key={m.id}
+              position={{ lat: m.lat, lng: m.lng }}
+              onClick={() => setActivePopup(`member-${m.id}`)}
+            >
+              <div style={{ position: 'relative', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Outer pulse ring */}
+                <div style={{
+                  position: 'absolute', width: '100%', height: '100%',
+                  borderRadius: '50%', background: '#19BFFF', opacity: 0.25,
+                  animation: 'pulse 2s ease-in-out infinite',
+                }} />
+                {/* Inner solid dot */}
+                <div style={{
+                  width: 30, height: 30, borderRadius: '50%',
+                  background: '#19BFFF',
+                  border: '3px solid #fff',
+                  boxShadow: '0 0 16px rgba(25,191,255,0.9)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#000', fontSize: 11, fontWeight: 800,
+                }}>
+                  {initial}
+                </div>
+                <div style={{
+                  position: 'absolute', bottom: -16, left: '50%',
+                  transform: 'translateX(-50%)',
+                  fontSize: 9, fontWeight: 800, color: '#19BFFF',
+                  letterSpacing: '0.08em', whiteSpace: 'nowrap',
+                  textShadow: '0 0 6px rgba(25,191,255,0.8)',
+                }}>
+                  YOU
+                </div>
+              </div>
+              {activePopup === `member-${m.id}` && (
+                <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: m.lat, lng: m.lng }}>
+                  <div style={{ color: '#000', fontSize: 12, fontWeight: 700 }}>
+                    {m.name || 'You'} <span style={{ color: '#888', fontWeight: 400, fontSize: 10 }}>(You)</span>
+                  </div>
+                  <div style={{ color: '#888', fontSize: 11 }}>Live location · {m.speedKmh ?? 0} km/h</div>
+                </InfoWindow>
+              )}
+            </AdvancedMarker>
+          );
+        }
         return (
           <AdvancedMarker
             key={m.id}
@@ -427,18 +495,13 @@ function MapContent({
             >
               <div style={{ position: 'absolute', width: '100%', height: '100%', borderRadius: '50%', background: style.hex, opacity: 0.3 }} />
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0A0A0A', border: `2px solid ${style.hex}`, color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 10px ${style.hex}` }}>
-                {m.name.charAt(0)}
+                {initial}
               </div>
-              {m.isCurrentUser && (
-                <div style={{ position: 'absolute', bottom: -14, left: '50%', transform: 'translateX(-50%)', fontSize: 9, fontWeight: 700, color: style.hex, letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
-                  YOU
-                </div>
-              )}
             </div>
             {activePopup === `member-${m.id}` && (
               <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: m.lat, lng: m.lng }}>
                 <div style={{ color: '#000', fontSize: 12, fontWeight: 700 }}>
-                  {m.name} {m.isCurrentUser && <span style={{ color: '#888', fontWeight: 400, fontSize: 10 }}>(You)</span>}
+                  {m.name || 'Member'}
                 </div>
                 <div style={{ color: '#888', fontSize: 11 }}>{style.label} · {m.speedKmh ?? 0} km/h</div>
               </InfoWindow>

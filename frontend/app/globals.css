@@ -173,6 +173,14 @@
   50% { opacity: 0.6; box-shadow: 0 0 14px rgba(25, 191, 255, 0.8); }
 }
 
+/* YOU map marker pulsing ring */
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.4; }
+  70% { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+
 .animate-pulse-subtle {
   animation: pulse-subtle 3s ease-in-out infinite;
 }

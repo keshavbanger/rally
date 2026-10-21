@@ -45,6 +45,7 @@ import { TripSocket } from '@/lib/ws/client';
 import type { ConnectionStatus, ServerMessage, TripStateMember } from '@/lib/ws/types';
 import type { AlertItem, AlertType as MockAlertType, CreateGroupInput, Group, Member, RiskAssessment, SafetyStatus, TripSummary } from '@/lib/mock/types';
 import type { GroupService } from '@/lib/mock/groupService';
+import { saveTripSummary } from '@/lib/mock/tripHistoryService';
 
 const REFRESH_INTERVAL_MS = 20_000;
 
@@ -343,6 +344,8 @@ class RallyGroupService implements GroupService {
         created_at: new Date().toISOString(),
       };
       const summary = this.buildTripSummary(fallbackTrip, null, null);
+      // Persist to local history so the trip appears immediately on the history page
+      saveTripSummary(summary);
       await this.teardown();
       return summary;
     }
@@ -367,20 +370,30 @@ class RallyGroupService implements GroupService {
       analyticsApi.getTripInsights(ended.id).catch(() => null),
     ]);
     const summary = this.buildTripSummary(ended, analytics, insights);
+    // Persist the rich summary (with analytics + insights) to local history
+    // so the trip appears immediately on the history page without waiting
+    // for the backend list endpoint to update.
+    saveTripSummary(summary);
     await this.teardown();
     return summary;
   }
 
   subscribe(listener: (group: Group | null) => void): () => void {
     this.listeners.add(listener);
-    if (!this.initPromise) {
+    // Always immediately deliver the current state to new subscribers —
+    // if the service already has a group (created/joined before navigation),
+    // the caller gets it synchronously without waiting for init() to finish.
+    listener(this.group);
+
+    if (this.group) {
+      // Group already available: ensure refresh timer is running but don't
+      // re-run the expensive init() flow that would briefly null out the group.
+      if (!this.refreshTimer) {
+        this.refreshTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
+      }
+    } else if (!this.initPromise) {
+      // No group and no pending init: start one.
       this.initPromise = this.init();
-    } else {
-      // A subscriber joining after the first init() already resolved
-      // (e.g. a second component mounting, or navigating to a new page)
-      // needs the CURRENT state right away — otherwise it sees nothing
-      // until the next periodic refresh, up to REFRESH_INTERVAL_MS later.
-      listener(this.group);
     }
     return () => this.listeners.delete(listener);
   }
@@ -422,9 +435,14 @@ class RallyGroupService implements GroupService {
           return;
         }
       }
+      this.group = null;
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 401)) {
         console.error('Failed to load current group', err);
+      }
+    } finally {
+      if (!this.group) {
+        this.initPromise = null;
       }
     }
     this.emit();
@@ -454,6 +472,48 @@ class RallyGroupService implements GroupService {
         this.currentUserId = null;
       }
     }
+
+    // Set an immediate baseline group state so requireGroup() succeeds
+    // and callers/UI never see null even before the first refresh completes
+    const startedAt = trip.started_at ? new Date(trip.started_at).getTime() : Date.now();
+    this.group = {
+      id: apiGroup.id,
+      name: apiGroup.name,
+      destination: apiGroup.destination_name ?? trip.destination_name ?? 'Destination',
+      destinationLat: 0,
+      destinationLng: 0,
+      maxMembers: 5,
+      joinCode: apiGroup.join_code,
+      createdAt: new Date(apiGroup.created_at).getTime(),
+      members: [
+        {
+          id: this.currentUserId ?? 'creator',
+          name: 'Leader',
+          role: 'Leader',
+          isCurrentUser: true,
+          online: true,
+          status: 'safe',
+          lat: 0,
+          lng: 0,
+          speedKmh: 0,
+          headingDeg: 0,
+          distanceFromGroupM: 0,
+          lastSeen: 'Just now',
+        },
+      ],
+      alerts: [],
+      route: [],
+      trip: {
+        distanceKm: 0,
+        durationMin: 0,
+        membersCount: 1,
+        alertsCount: 0,
+        startedAt,
+      },
+      risk: { score: 100, level: 'LOW RISK' },
+      paused: false,
+    };
+    this.emit();
 
     await this.refresh();
 
@@ -594,13 +654,18 @@ class RallyGroupService implements GroupService {
     }
     try {
       const [dashboard, members, alerts] = await Promise.all([
-        analyticsApi.getDashboard(this.apiTrip.id),
-        groupsApi.getGroupMembers(this.apiGroup.id),
+        analyticsApi.getDashboard(this.apiTrip.id).catch((err) => {
+          console.warn('Dashboard fetch deferred:', err);
+          return null;
+        }),
+        groupsApi.getGroupMembers(this.apiGroup.id).catch(() => [] as ApiGroupMember[]),
         alertsApi.listActiveTripAlerts(this.apiTrip.id).catch(() => [] as ApiAlert[]),
       ]);
-      this.lastDashboard = dashboard;
+      if (dashboard) {
+        this.lastDashboard = dashboard;
+        this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
+      }
       this.activeAlerts = Array.isArray(alerts) ? alerts : (alerts as any)?.alerts ?? [];
-      this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
       this.rebuildGroup(members);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return; // client.ts already redirects

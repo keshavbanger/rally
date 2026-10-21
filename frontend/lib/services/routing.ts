@@ -23,7 +23,8 @@ export interface RouteOption {
 
 export async function calculateRoute(
   start: { lat: number; lng: number },
-  destination: { lat: number; lng: number }
+  destination: { lat: number; lng: number },
+  intermediates?: { lat: number; lng: number }[]
 ): Promise<RouteOption[]> {
   // Validate coordinates
   if (
@@ -34,10 +35,18 @@ export async function calculateRoute(
     throw new Error('Invalid coordinates provided');
   }
 
+  if (intermediates) {
+    for (const pt of intermediates) {
+      if (pt.lat < -90 || pt.lat > 90 || pt.lng < -180 || pt.lng > 180) {
+        throw new Error('Invalid waypoint coordinates provided');
+      }
+    }
+  }
+
   // ── Google Routes API (preferred) ─────────────────────────────────────────
   if (hasGoogleMapsKey()) {
     try {
-      return await calculateGoogleRoute(start, destination);
+      return await calculateGoogleRoute(start, destination, intermediates);
     } catch (err: any) {
       console.warn('[routing] Google Routes API failed, falling back to OSRM:', err.message);
       // Fall through to OSRM
@@ -45,16 +54,18 @@ export async function calculateRoute(
   }
 
   // ── OSRM public demo server (fallback / no key) ────────────────────────────
-  return calculateOsrmRoute(start, destination);
+  return calculateOsrmRoute(start, destination, intermediates);
 }
 
 async function calculateOsrmRoute(
   start: { lat: number; lng: number },
-  destination: { lat: number; lng: number }
+  destination: { lat: number; lng: number },
+  intermediates?: { lat: number; lng: number }[]
 ): Promise<RouteOption[]> {
+  const points = [start, ...(intermediates || []), destination];
+  const coordStr = points.map((p) => `${p.lng},${p.lat}`).join(';');
   const url =
-    `https://router.project-osrm.org/route/v1/driving/` +
-    `${start.lng},${start.lat};${destination.lng},${destination.lat}` +
+    `https://router.project-osrm.org/route/v1/driving/${coordStr}` +
     `?overview=full&geometries=geojson&alternatives=true`;
 
   const res = await fetch(url);

@@ -73,13 +73,13 @@ def list_active_group_members(db: Session, group_id: uuid.UUID) -> List[dict]:
     not an oversight; see the README."""
     rows = db.execute(
         select(GroupMember, Profile)
-        .join(Profile, GroupMember.user_id == Profile.id)
+        .outerjoin(Profile, GroupMember.user_id == Profile.id)
         .where(GroupMember.group_id == group_id, GroupMember.status == MemberStatus.ACTIVE)
     ).all()
     return [
         {
             "user_id": member.user_id,
-            "name": profile.full_name,
+            "name": (profile.full_name if profile and profile.full_name else None) or "Member",
             "role": member.role.value,
             "joined_at": member.joined_at,
         }

@@ -23,7 +23,29 @@ const formatDuration = (min: number) => {
 function TripContent({ group }: { group: Group }) {
   const router = useRouter();
   const { user } = useAuth();
-  const { location, isTracking, error: locError } = useLocation();
+  const { location, isTracking, error: locError, startTracking, stopTracking } = useLocation();
+
+  // Auto-start GPS tracking as soon as the trip page mounts
+  useEffect(() => {
+    startTracking();
+    return () => {
+      // Don't stop tracking on unmount — let the user control it,
+      // but stop sending position updates to the service.
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pipe every GPS fix into the group service → updates live map marker
+  useEffect(() => {
+    if (location && isTracking) {
+      groupService.updateMyPosition(
+        location.latitude,
+        location.longitude,
+        location.speed,
+        location.heading,
+      );
+    }
+  }, [location, isTracking]);
   const [showEndModal, setShowEndModal] = useState(false);
   const [ending, setEnding] = useState(false);
 
