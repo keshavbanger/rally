@@ -19,7 +19,7 @@ from app.models.group_member import GroupMember
 from app.models.trip import Trip
 from app.notifications import service as notification_service
 from app.route import service as route_service
-from app.schemas.analytics import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT, TripHistoryResponse
+from app.schemas.analytics import AnalyticsHistoryResponse, DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT, TripHistoryResponse
 from app.schemas.trip import TripCreate, TripResponse, TripStart
 from app.services import live_state_service, trip_service
 from app.websocket.manager import publish_event
@@ -47,7 +47,7 @@ def list_group_trips_endpoint(
     group_id: uuid.UUID,
     member: GroupMember = Depends(require_group_member),
     db: Session = Depends(get_db),
-    status_: Optional[TripStatus] = Query(None, alias="status"),
+    status_: Optional[str] = Query(None, alias="status"),
     from_: Optional[datetime] = Query(None, alias="from"),
     to: Optional[datetime] = Query(None),
     limit: int = Query(DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
@@ -65,18 +65,41 @@ def list_group_trips_endpoint(
 def list_my_trip_history_endpoint(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
-    status_: Optional[TripStatus] = Query(None, alias="status"),
+    status_: Optional[str] = Query(None, alias="status"),
     from_: Optional[datetime] = Query(None, alias="from"),
     to: Optional[datetime] = Query(None),
     limit: int = Query(DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
     offset: int = Query(0, ge=0),
 ):
-    """Trips across every group the authenticated user actively belongs
-    to, newest first. The user id always comes from the verified token —
-    there is no user_id query/body parameter to spoof another user's
-    history with."""
+    """Trips across every group the authenticated user belongs
+    to, newest first."""
     return trip_history.list_user_trip_history(
         db, uuid.UUID(user_id), status=status_, from_time=from_, to_time=to, limit=limit, offset=offset
+    )
+
+
+@router.get("/trips/history", response_model=TripHistoryResponse)
+@router.get("/history", response_model=TripHistoryResponse)
+def get_trips_history_endpoint(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    status_: Optional[str] = Query(None, alias="status"),
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = Query(None),
+    limit: int = Query(DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
+    offset: int = Query(0, ge=0),
+):
+    """Trip history for the authenticated user — returns trips where status
+    is 'completed' or 'ended' by default, or filtered by requested status."""
+    return trip_history.list_user_trip_history(
+        db,
+        uuid.UUID(user_id),
+        status=status_,
+        from_time=from_,
+        to_time=to,
+        limit=limit,
+        offset=offset,
+        completed_or_ended_default=True if status_ is None else False,
     )
 
 

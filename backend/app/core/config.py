@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     AUTH_RATE_LIMIT_PER_MINUTE: int = 20
     JOIN_GROUP_RATE_LIMIT_PER_MINUTE: int = 10
     SOS_RATE_LIMIT_PER_MINUTE: int = 5
+    # Polling endpoints limit (dashboard, active alerts, group members)
+    POLLING_RATE_LIMIT_PER_MINUTE: int = 120
+    # In development mode, exempt high-frequency polling from rate limiting
+    DEV_MODE_RATE_LIMIT_EXEMPT: bool = True
     # GPS is high-frequency, so this is expressed per-second; the REST
     # endpoint converts it to per-minute with math.ceil (see locations.py).
     MAX_LOCATION_UPDATES_PER_SECOND: float = 1.0

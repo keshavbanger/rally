@@ -91,6 +91,7 @@ async def check_and_consume(redis: Redis, scope: str, identifier: str, limit: in
 async def _enforce(scope: str, identifier: str, limit_per_minute: int, window_seconds: int) -> None:
     if not settings.RATE_LIMIT_ENABLED:
         return
+
     try:
         redis = get_redis()
     except RuntimeError:
@@ -141,23 +142,42 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
 
     EXEMPT_PATH_PREFIXES = ("/docs", "/redoc", "/openapi.json")
 
+    POLLING_PATH_SUBSTRINGS = (
+        "/dashboard",
+        "/alerts/active",
+        "/members",
+    )
+
     async def dispatch(self, request: Request, call_next):
         if not settings.RATE_LIMIT_ENABLED or request.url.path in ("/", ) or any(
             request.url.path.startswith(p) for p in self.EXEMPT_PATH_PREFIXES
         ) or request.url.path.endswith("/health"):
             return await call_next(request)
 
+        is_polling_endpoint = any(p in request.url.path for p in self.POLLING_PATH_SUBSTRINGS)
+        is_dev = settings.ENVIRONMENT.lower() in ("development", "dev", "local")
+
+        # In dev mode, exempt polling endpoints completely if DEV_MODE_RATE_LIMIT_EXEMPT is True
+        if is_dev and is_polling_endpoint and getattr(settings, "DEV_MODE_RATE_LIMIT_EXEMPT", False):
+            return await call_next(request)
+
         identifier = self._identify(request)
+        scope = "api:polling" if is_polling_endpoint else "api"
         try:
             redis = get_redis()
+            limit = (
+                getattr(settings, "POLLING_RATE_LIMIT_PER_MINUTE", 120)
+                if is_polling_endpoint
+                else settings.GENERAL_API_RATE_LIMIT_PER_MINUTE
+            )
             allowed, retry_after = await check_and_consume(
-                redis, "api", identifier, settings.GENERAL_API_RATE_LIMIT_PER_MINUTE, _DEFAULT_WINDOW_SECONDS
+                redis, scope, identifier, limit, _DEFAULT_WINDOW_SECONDS
             )
         except RuntimeError:
             allowed, retry_after = True, 0  # Redis not configured — fail open.
 
         if not allowed:
-            metrics.increment("rate_limited_total", {"scope": "api"})
+            metrics.increment("rate_limited_total", {"scope": scope})
             return JSONResponse(
                 status_code=429,
                 content=build_error_body(

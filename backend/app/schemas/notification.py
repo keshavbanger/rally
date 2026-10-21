@@ -29,6 +29,8 @@ class NotificationListResponse(BaseModel):
     limit: int
     offset: int
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class UnreadCountResponse(BaseModel):
     unread_count: int

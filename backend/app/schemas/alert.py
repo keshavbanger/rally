@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import AlertSeverity, AlertStatus, AlertType
 
@@ -25,6 +25,8 @@ class AlertResponse(BaseModel):
     created_at: datetime
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertQuery(BaseModel):

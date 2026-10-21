@@ -46,7 +46,7 @@ import type { ConnectionStatus, ServerMessage, TripStateMember } from '@/lib/ws/
 import type { AlertItem, AlertType as MockAlertType, CreateGroupInput, Group, Member, RiskAssessment, SafetyStatus, TripSummary } from '@/lib/mock/types';
 import type { GroupService } from '@/lib/mock/groupService';
 
-const REFRESH_INTERVAL_MS = 20_000;
+const REFRESH_INTERVAL_MS = 15_000;
 
 const ALERT_TYPE_MAP: Record<string, MockAlertType> = {
   FALLING_BEHIND: 'separation',
@@ -462,7 +462,7 @@ class RallyGroupService implements GroupService {
       this.socket.onMessage((message) => this.handleSocketMessage(message));
       this.socket.onStatusChange((status) => {
         this.setConnectionStatus(status);
-        if (status === 'CONNECTED') void this.refresh(); // re-sync after (re)connect — item 37
+        if (status === 'CONNECTED') void this.refresh(true); // force re-sync after (re)connect
       });
       void this.socket.connect();
     } else {
@@ -587,11 +587,18 @@ class RallyGroupService implements GroupService {
     }
   }
 
-  async refresh(): Promise<void> {
+  async refresh(force: boolean = false): Promise<void> {
     if (!this.apiGroup || !this.apiTrip) {
       await this.init();
       return;
     }
+
+    // Disable background HTTP polling while WebSocket is actively connected
+    // and delivering live updates, preventing rate limiting (HTTP 429).
+    if (!force && this.connectionStatus === 'CONNECTED' && this.socket) {
+      return;
+    }
+
     try {
       const [dashboard, members, alerts] = await Promise.all([
         analyticsApi.getDashboard(this.apiTrip.id),
@@ -604,6 +611,10 @@ class RallyGroupService implements GroupService {
       this.rebuildGroup(members);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return; // client.ts already redirects
+      if (err instanceof ApiError && err.status === 429) {
+        console.warn('[RallyGroupService] Rate limited (429) during polling, skipping cycle.');
+        return;
+      }
       console.error('Failed to refresh dashboard', err);
     }
   }
@@ -857,7 +868,22 @@ class RallyGroupService implements GroupService {
   }
 }
 
-const rallyGroupServiceInstance = new RallyGroupService();
+interface GlobalWithRallyGroupService {
+  __rally_group_service__?: RallyGroupService;
+}
+
+const globalStore = (typeof globalThis !== 'undefined' ? globalThis : window) as unknown as GlobalWithRallyGroupService;
+
+function getRallyGroupService(): RallyGroupService {
+  if (globalStore.__rally_group_service__) {
+    return globalStore.__rally_group_service__;
+  }
+  const instance = new RallyGroupService();
+  globalStore.__rally_group_service__ = instance;
+  return instance;
+}
+
+const rallyGroupServiceInstance = getRallyGroupService();
 export const rallyGroupService: RallyGroupService = rallyGroupServiceInstance;
 export type { RallyGroupService };
 /** Escape hatch for the one capability (sending GPS) that isn't part of

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import SOSStatus
 
@@ -31,3 +31,5 @@ class SOSResponse(BaseModel):
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

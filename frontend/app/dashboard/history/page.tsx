@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Compass, Loader2 } from 'lucide-react';
+import { Search, Compass, Loader2, MapPin, Route as RouteIcon, Shield } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/lib/mock/useGroup';
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
+import { supabase } from '@/lib/supabase/client';
 import type { TripSummary } from '@/lib/mock/types';
 
 export default function TripHistoryPage() {
@@ -24,35 +25,84 @@ export default function TripHistoryPage() {
     async function loadTrips() {
       const local = getTripHistory();
       try {
-        const remote = await tripsApi.listMyTripHistory({ limit: 50 });
+        // Try FastAPI GET /trips/history first, falling back to /users/me/trips
+        const remote = await tripsApi.getTripsHistory({ limit: 50 }).catch(() => tripsApi.listMyTripHistory({ limit: 50 }));
         if (cancelled) return;
-        if (remote && remote.items && remote.items.length > 0) {
-          const remoteMapped: TripSummary[] = remote.items.map((t) => {
+
+        let items = remote?.items;
+
+        // Fallback directly to Supabase if backend returned no items or empty
+        if (!items || items.length === 0) {
+          try {
+            const { data: supaTrips } = await supabase
+              .from('trips')
+              .select('id, destination_name, status, started_at, ended_at, distance, duration, safety_score, created_at')
+              .in('status', ['COMPLETED', 'completed', 'ended', 'ENDED'])
+              .order('created_at', { ascending: false })
+              .limit(50);
+
+            if (supaTrips && supaTrips.length > 0) {
+              items = supaTrips.map((st) => ({
+                trip_id: st.id,
+                name: st.destination_name,
+                destination_name: st.destination_name,
+                status: (st.status?.toUpperCase() || 'COMPLETED') as any,
+                started_at: st.started_at || st.created_at,
+                ended_at: st.ended_at,
+                member_count: 1,
+                distance_meters: st.distance ? Math.round(st.distance * 1000) : null,
+                distance: st.distance,
+                duration: st.duration,
+                safety_score: st.safety_score,
+              }));
+            }
+          } catch (supaErr) {
+            console.warn('Could not query Supabase directly:', supaErr);
+          }
+        }
+
+        if (items && items.length > 0) {
+          const remoteMapped: TripSummary[] = items.map((t) => {
             const started = t.started_at ? new Date(t.started_at) : new Date();
+            const distanceKm = t.distance != null
+              ? Number(t.distance.toFixed(1))
+              : (t.distance_meters != null ? Number((t.distance_meters / 1000).toFixed(1)) : 0);
+            const durationMin = t.duration != null
+              ? t.duration
+              : ((t.started_at && t.ended_at)
+                  ? Math.round((new Date(t.ended_at).getTime() - new Date(t.started_at).getTime()) / 60000)
+                  : 0);
+
+            const routeWaypoints = t.route?.coordinates?.map(([lng, lat]: number[]) => ({ lat, lng })) || [];
+            const destName = t.destination_name || t.name || (t.route?.name) || 'Completed Destination';
+
             return {
-              id: t.trip_id,
+              id: String(t.trip_id),
               groupName: t.name || 'Rally Trip',
-              destination: (t as any).destination_name || 'Destination',
+              destination: destName,
               date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
               completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
-              distanceKm: (t as any).distance ? Number(((t as any).distance / 1000).toFixed(1)) : 0,
-              durationMin: (t as any).duration ? Math.round((t as any).duration / 60) : 0,
-              membersCount: (t as any).member_count || 1,
-              alertsCount: (t as any).alerts_count ?? 0,
+              distanceKm,
+              durationMin,
+              membersCount: t.member_count || 1,
+              alertsCount: 0,
               routeDeviations: null,
               separationEvents: null,
               unexpectedStops: null,
               sosCount: null,
-              safetyScore: (t as any).safety_score ?? 100,
-              riskLevel: 'LOW RISK',
-              route: [],
-              destinationLat: 0,
-              destinationLng: 0,
+              safetyScore: t.safety_score ?? 100,
+              riskLevel: (t.safety_score ?? 100) >= 80 ? 'LOW RISK' : 'MEDIUM RISK',
+              route: routeWaypoints,
+              destinationLat: t.route?.destination_latitude ?? 0,
+              destinationLng: t.route?.destination_longitude ?? 0,
               alertPoints: [],
               deviationPoint: null,
               keyEvents: [],
               insights: [],
-            };
+              // preserve status and route flag for display/filter
+              _status: t.status,
+              _hasRoute: !!t.route || routeWaypoints.length > 0,
+            } as TripSummary & { _status: string; _hasRoute?: boolean };
           });
 
           const merged = [...remoteMapped];
@@ -87,11 +137,15 @@ export default function TripHistoryPage() {
   }
 
   const filtered = allTrips.filter((trip) => {
+    const tripWithStatus = trip as TripSummary & { _status?: string };
     if (search && !trip.groupName.toLowerCase().includes(search.toLowerCase()) && !trip.destination.toLowerCase().includes(search.toLowerCase())) return false;
-    // Since mock doesn't currently support cancelled trips natively, we assume all are Completed
-    // If the data model adds a status field, we would filter here.
-    if (filter === 'Completed') return true; // assuming all are completed for now
-    if (filter === 'Cancelled') return false; // no cancelled trips yet
+    if (filter === 'Completed') {
+      // Trips without a _status field (local/mock) are assumed completed.
+      return !tripWithStatus._status || tripWithStatus._status === 'COMPLETED';
+    }
+    if (filter === 'Cancelled') {
+      return tripWithStatus._status === 'CANCELLED';
+    }
     return true;
   });
 
@@ -188,16 +242,38 @@ export default function TripHistoryPage() {
                       <h3 className="text-base font-semibold text-foreground">{trip.groupName}</h3>
                       <p className="text-sm text-muted-foreground mt-0.5">{trip.date}</p>
                     </div>
-                    <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-md">
-                      🟢 Completed
-                    </span>
+                    {(() => {
+                      const s = (trip as any)._status || 'COMPLETED';
+                      if (s === 'CANCELLED') {
+                        return <span className="flex items-center gap-1.5 text-xs font-bold text-red-400 bg-red-400/10 px-2.5 py-1 rounded-md">🔴 Cancelled</span>;
+                      }
+                      if (s === 'ACTIVE') {
+                        return <span className="flex items-center gap-1.5 text-xs font-bold text-rally-blue bg-rally-blue/10 px-2.5 py-1 rounded-md animate-pulse">🔵 Active</span>;
+                      }
+                      return <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-md">🟢 Completed</span>;
+                    })()}
                   </div>
 
-                  {trip.destination && (
-                    <div className="text-sm text-foreground flex items-center gap-2">
-                      📍 {trip.destination}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {trip.destination && (
+                      <div className="text-sm text-foreground flex items-center gap-1.5 font-medium">
+                        <MapPin className="w-4 h-4 text-rally-blue shrink-0" />
+                        {trip.destination}
+                      </div>
+                    )}
+                    {((trip as any)._hasRoute || (trip.route && trip.route.length > 0)) && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-400 bg-cyan-400/10 border border-cyan-400/20 px-2 py-0.5 rounded-full">
+                        <RouteIcon className="w-3 h-3" />
+                        Route Recorded
+                      </span>
+                    )}
+                    {trip.safetyScore != null && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
+                        <Shield className="w-3 h-3" />
+                        {trip.safetyScore}% Safety
+                      </span>
+                    )}
+                  </div>
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">
                     <div className="text-sm text-muted-foreground font-medium flex items-center flex-wrap gap-2">

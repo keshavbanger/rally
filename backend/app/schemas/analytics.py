@@ -9,7 +9,7 @@ mistakes "unknown" for "nothing happened."
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,6 +51,8 @@ class TripAnalytics(BaseModel):
     # way; see app/analytics/snapshot.py.
     source: str
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 # ---- Member analytics ---------------------------------------------------
 
@@ -82,10 +84,14 @@ class MemberAnalyticsItem(BaseModel):
     alerts_received: int
     sos_triggered: int
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class MemberAnalyticsResponse(BaseModel):
     trip_id: uuid.UUID
     members: List[MemberAnalyticsItem]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Route analytics ---------------------------------------------------
@@ -110,6 +116,8 @@ class RouteAnalytics(BaseModel):
     # point to evaluate arrival from.
     arrived: Optional[bool] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 # ---- Safety analytics ---------------------------------------------------
 
@@ -120,11 +128,15 @@ class AlertCounts(BaseModel):
     warning: int
     critical: int
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class SosCounts(BaseModel):
     total: int
     resolved: int
     cancelled: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class IntelligenceEventCounts(BaseModel):
@@ -132,12 +144,16 @@ class IntelligenceEventCounts(BaseModel):
     resolved: int
     active: int
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class SafetyAnalytics(BaseModel):
     alerts: AlertCounts
     by_type: Dict[str, int]
     sos: SosCounts
     intelligence_events: IntelligenceEventCounts
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Timeline -----------------------------------------------------------
@@ -148,33 +164,63 @@ class TimelineEvent(BaseModel):
     timestamp: datetime
     data: Dict[str, Any] = {}
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class TripTimeline(BaseModel):
     trip_id: uuid.UUID
     events: List[TimelineEvent]
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 # ---- Trip history ---------------------------------------------------
+
+
+class TripHistoryRoute(BaseModel):
+    id: Optional[str] = None
+    name: Optional[str] = None
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+    destination_latitude: Optional[float] = None
+    destination_longitude: Optional[float] = None
+    distance_meters: Optional[float] = None
+    estimated_duration_seconds: Optional[int] = None
+    status: Optional[str] = None
+    coordinates: List[Any] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TripHistoryItem(BaseModel):
     trip_id: uuid.UUID
     name: Optional[str] = None
-    status: str
+    destination_name: Optional[str] = None
+    status: str = "COMPLETED"
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    member_count: int
+    member_count: int = 0
     # None when the trip has no GPS history at all (e.g. never started).
     distance_meters: Optional[float] = None
+    distance: Optional[float] = None
+    duration: Optional[int] = None
+    duration_seconds: Optional[int] = None
+    safety_score: Optional[int] = None
+    route: Optional[Union[TripHistoryRoute, Dict[str, Any]]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class TripHistoryResponse(BaseModel):
-    items: List[TripHistoryItem]
-    total: int
-    limit: int
-    offset: int
+    items: List[TripHistoryItem] = []
+    total: int = 0
+    limit: int = DEFAULT_HISTORY_LIMIT
+    offset: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+AnalyticsHistoryResponse = TripHistoryResponse
 
 
 # ---- Trip replay (Phase 12) ---------------------------------------------
@@ -192,10 +238,14 @@ class ReplayMemberState(BaseModel):
     # the trip has no route, or this point didn't match one.
     route_progress: Optional[float] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class ReplayFrame(BaseModel):
     timestamp: datetime
     members: List[ReplayMemberState]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TripReplay(BaseModel):
@@ -209,6 +259,8 @@ class TripReplay(BaseModel):
     interval_seconds: int
     timeline: List[ReplayFrame]
     events: List[TimelineEvent]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Trip insights (Phase 12) --------------------------------------------
@@ -224,6 +276,8 @@ class TripInsightsStatistics(BaseModel):
     member_count: int
     active_member_count: int
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class TripInsights(BaseModel):
     trip_id: uuid.UUID
@@ -232,6 +286,8 @@ class TripInsights(BaseModel):
     # an insight with no supporting data simply isn't included.
     highlights: List[str]
     statistics: TripInsightsStatistics
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Dashboard ---------------------------------------------------------
@@ -243,6 +299,8 @@ class DashboardTrip(BaseModel):
     status: str
     started_at: Optional[datetime] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardRoute(BaseModel):
     route_available: bool
@@ -253,6 +311,8 @@ class DashboardRoute(BaseModel):
     # or whenever it can't be computed (no route, no usable location).
     eta_seconds: Optional[float] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardGroup(BaseModel):
     member_count: int
@@ -262,11 +322,15 @@ class DashboardGroup(BaseModel):
     moving_count: Optional[int] = None
     stopped_count: Optional[int] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardSafety(BaseModel):
     active_alerts: int
     critical_alerts: int
     active_sos: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardMember(BaseModel):
@@ -282,6 +346,8 @@ class DashboardMember(BaseModel):
     # for a COMPLETED trip.
     distance_from_group_center_meters: Optional[float] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardRisk(BaseModel):
     """Mirrors RiskScore (app/schemas/risk.py) — duplicated here rather
@@ -291,6 +357,8 @@ class DashboardRisk(BaseModel):
 
     score: int
     level: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardEta(BaseModel):
@@ -306,11 +374,15 @@ class DashboardEta(BaseModel):
     group_eta_seconds: Optional[float] = None
     source: Optional[str] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardWeatherWarning(BaseModel):
     type: str
     severity: str
     reason: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardWeather(BaseModel):
@@ -322,9 +394,13 @@ class DashboardWeather(BaseModel):
     visibility_meters: Optional[float] = None
     warnings: List[DashboardWeatherWarning] = []
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class DashboardNotifications(BaseModel):
     unread_count: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardResponse(BaseModel):
@@ -341,3 +417,5 @@ class DashboardResponse(BaseModel):
     eta: DashboardEta
     weather: DashboardWeather
     notifications: DashboardNotifications
+
+    model_config = ConfigDict(from_attributes=True)
