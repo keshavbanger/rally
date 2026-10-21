@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthProvider';
@@ -15,9 +15,11 @@ import { useAuth } from '@/lib/auth/AuthProvider';
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const redirectedRef = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (!authLoading && !user && !redirectedRef.current) {
+      redirectedRef.current = true;
       const redirect = typeof window !== 'undefined' ? window.location.pathname : '/dashboard';
       router.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
     }

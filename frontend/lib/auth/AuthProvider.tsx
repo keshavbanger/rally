@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 
 /** Discriminated outcome for signUpWithPassword so the UI can react
  * precisely to each scenario without guessing. */
@@ -32,7 +32,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const supabase = getSupabaseClient();
     let active = true;
 
     supabase.auth.getSession().then(({ data }) => {
@@ -58,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
-    const { data, error } = await getSupabaseClient().auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     // Update context state directly from the response rather than waiting
     // on onAuthStateChange above — supabase-js dispatches that listener via
     // a deferred setTimeout(0), so a caller that awaits this and then
@@ -71,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUpWithPassword = useCallback(async (email: string, password: string, fullName?: string): Promise<SignUpOutcome> => {
-    const { data, error } = await getSupabaseClient().auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: fullName ? { data: { full_name: fullName } } : undefined,
@@ -113,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await getSupabaseClient().auth.signOut();
+    await supabase.auth.signOut();
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -142,6 +141,6 @@ export function useAuth(): AuthContextValue {
  * render can call for the CURRENT token on demand, without re-rendering
  * every time it changes. */
 export async function getCurrentAccessToken(): Promise<string | null> {
-  const { data } = await getSupabaseClient().auth.getSession();
+  const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }

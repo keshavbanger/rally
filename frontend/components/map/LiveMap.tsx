@@ -54,12 +54,18 @@ interface LiveMapProps {
 function useDeviceLocation() {
   const [loc, setLoc] = useState<google.maps.LatLngLiteral | null>(null);
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (typeof window === 'undefined' || !navigator.geolocation) return;
+    let active = true;
     navigator.geolocation.getCurrentPosition(
-      (p) => setLoc({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (p) => {
+        if (active) setLoc({ lat: p.coords.latitude, lng: p.coords.longitude });
+      },
       () => {},
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
+    return () => {
+      active = false;
+    };
   }, []);
   return loc;
 }
@@ -224,6 +230,10 @@ function MapContent({
       ? { lat: destLat, lng: destLng }
       : { lat: 19.076, lng: 72.8777 }); // Mumbai default
 
+  const onRouteSelectRef = useRef(onRouteSelect);
+  onRouteSelectRef.current = onRouteSelect;
+  const lastFittedRouteRef = useRef<string>('');
+
   // ── Draw route polylines ──────────────────────────────────────────────────
 
   useEffect(() => {
@@ -243,9 +253,7 @@ function MapContent({
         strokeOpacity: alt.selected ? 1 : 0.6,
         map,
       });
-      if (onRouteSelect) {
-        line.addListener('click', () => onRouteSelect(alt.id));
-      }
+      line.addListener('click', () => onRouteSelectRef.current?.(alt.id));
       polylinesRef.current.push(line);
     });
 
@@ -253,18 +261,25 @@ function MapContent({
       polylinesRef.current.forEach((p) => p.setMap(null));
       polylinesRef.current = [];
     };
-  }, [map, effectiveRouteAlts, showRoute, onRouteSelect]);
+  }, [map, effectiveRouteAlts, showRoute]);
 
-  // ── Fit bounds whenever routes change ────────────────────────────────────
+  // ── Fit bounds whenever route geometry actually changes ───────────────────
+
+  const routeSignature = useMemo(() => {
+    return effectiveRouteAlts.map((a) => `${a.id}:${a.coordinates.length}:${a.coordinates[0]?.lat},${a.coordinates[0]?.lng}:${a.coordinates[a.coordinates.length - 1]?.lat}`).join(';');
+  }, [effectiveRouteAlts]);
 
   useEffect(() => {
     if (!map || !effectiveRouteAlts.length) return;
+    if (lastFittedRouteRef.current === routeSignature) return;
+    lastFittedRouteRef.current = routeSignature;
+
     const bounds = new google.maps.LatLngBounds();
     effectiveRouteAlts.forEach((alt) => alt.coordinates.forEach((c) => bounds.extend(c)));
     if (deviceLoc) bounds.extend(deviceLoc);
     if (hasDestination) bounds.extend({ lat: destLat, lng: destLng });
     if (!bounds.isEmpty()) map.fitBounds(bounds, 60);
-  }, [map, effectiveRouteAlts]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, effectiveRouteAlts, routeSignature, deviceLoc, hasDestination, destLat, destLng]);
 
   // ── Fit bounds on first mount if no routes ────────────────────────────────
 

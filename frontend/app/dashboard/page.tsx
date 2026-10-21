@@ -18,11 +18,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     // If the trip is already active on the backend, show the live map immediately
+    if (tripStarted) return;
     const tripId = (service as any).getTripId?.();
     if (tripId && (group?.trip?.distanceKm || (group as any)?.tripStatus === 'ACTIVE')) {
       setTripStarted(true);
     }
-  }, [group, service]);
+  }, [group, service, tripStarted]);
 
   const handleStartTrip = async () => {
     try {

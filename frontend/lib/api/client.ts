@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 import { env, API_V1 } from '@/lib/env';
 import { ApiError, NetworkError, type BackendErrorBody } from './errors';
 
@@ -37,12 +37,12 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
 }
 
 async function getAccessToken(): Promise<string | null> {
-  const { data } = await getSupabaseClient().auth.getSession();
+  const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
 
 async function refreshAccessToken(): Promise<string | null> {
-  const { data, error } = await getSupabaseClient().auth.refreshSession();
+  const { data, error } = await supabase.auth.refreshSession();
   if (error) return null;
   return data.session?.access_token ?? null;
 }

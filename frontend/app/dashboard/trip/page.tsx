@@ -10,7 +10,7 @@ import ConfirmModal from '@/components/dashboard/ConfirmModal';
 import { groupService } from '@/lib/group/groupService';
 import { useLocation } from '@/hooks/useLocation';
 import type { Group } from '@/lib/mock/types';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth/AuthProvider';
 
 // Mock function to format duration
 const formatDuration = (min: number) => {
@@ -22,18 +22,12 @@ const formatDuration = (min: number) => {
 
 function TripContent({ group }: { group: Group }) {
   const router = useRouter();
+  const { user } = useAuth();
   const { location, isTracking, error: locError } = useLocation();
   const [showEndModal, setShowEndModal] = useState(false);
   const [ending, setEnding] = useState(false);
-  const [actualName, setActualName] = useState('User');
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setActualName(user.user_metadata?.full_name || user.user_metadata?.name || 'User');
-      }
-    });
-  }, []);
+  const actualName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'User';
 
   const me = group.members.find((m) => m.isCurrentUser);
 

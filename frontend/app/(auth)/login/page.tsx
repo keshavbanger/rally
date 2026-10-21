@@ -9,7 +9,7 @@ import AuthHero from '@/components/auth/AuthHero';
 import SocialButton from '@/components/auth/SocialButton';
 import AuthInput from '@/components/auth/AuthInput';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 
 const STEPS = [
   { number: 1, text: 'Sign in to your account' },
@@ -27,7 +27,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
 
   const handleOAuth = async (provider: 'google' | 'github') => {
-    await getSupabaseClient().auth.signInWithOAuth({
+    await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: `${window.location.origin}/dashboard`

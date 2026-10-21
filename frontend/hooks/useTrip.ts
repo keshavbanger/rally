@@ -1,6 +1,6 @@
-﻿'use client';
+'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
 import type { ApiTrip } from '@/lib/api/types';
 import * as tripsApi from '@/lib/api/trips';
@@ -27,6 +27,8 @@ export function useTrip() {
   const [trip, setTrip] = useState<ApiTrip | null>(null);
   const [loading, setLoading] = useState(!!tripId);
   const [error, setError] = useState<Error | null>(null);
+  const tripIdRef = useRef(trip?.id);
+  tripIdRef.current = trip?.id;
 
   const fetchTrip = useCallback(async (id: string) => {
     setLoading(true);
@@ -56,11 +58,11 @@ export function useTrip() {
   useEffect(() => {
     return rallyGroupService.subscribe(() => {
       const newTripId = rallyGroupService.getTripId();
-      if (newTripId && newTripId !== trip?.id) {
+      if (newTripId && newTripId !== tripIdRef.current) {
         void fetchTrip(newTripId);
       }
     });
-  }, [trip?.id, fetchTrip]);
+  }, [fetchTrip]);
 
   const startTrip = useCallback(async (coords?: { latitude: number; longitude: number }) => {
     if (!tripId) throw new Error('No current trip.');
