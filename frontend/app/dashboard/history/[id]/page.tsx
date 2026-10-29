@@ -17,7 +17,6 @@ import type { TripSummary } from '@/lib/mock/types';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/hooks/useGroup';
 
-
 export default function TripDetailsPage() {
   const { id } = useParams();
   const { group } = useGroup();

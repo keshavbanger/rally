@@ -134,7 +134,7 @@ class RallyGroupService implements GroupService {
       if (err instanceof ApiError && err.status === 409) {
         // Already an active member of this group — load the group directly
         const myGroups = await groupsApi.listMyGroups();
-        const existing = myGroups.find((g) => g.join_code === code);
+        const existing = (myGroups as any[]).find((g) => g.join_code === code);
         if (existing) {
           apiGroup = await groupsApi.getGroup(existing.id);
         } else {
@@ -453,7 +453,7 @@ class RallyGroupService implements GroupService {
           alertsCount: 0,
           startedAt,
         },
-        risk: { score: 0, level: 'low' },
+        risk: { score: 0, level: 'LOW RISK' },
         paused: false,
       };
     }

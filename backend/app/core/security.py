@@ -37,20 +37,28 @@ from app.core.config import settings
 
 logger = logging.getLogger("rally.security")
 
-_jwk_client: Optional[PyJWKClient] = None
-
-
-def _get_jwk_client(supabase_url: str) -> PyJWKClient:
-    global _jwk_client
-    if _jwk_client is None:
-        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-        jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
-        _jwk_client = PyJWKClient(jwks_url, ssl_context=ssl_ctx)
-    return _jwk_client
+_ASYMMETRIC_ALGORITHMS = {"ES256", "RS256"}
 
 
 class InvalidTokenError(Exception):
     pass
+
+
+_jwks_client: Optional[PyJWKClient] = None
+
+
+def _get_jwks_client() -> Optional[PyJWKClient]:
+    """Lazily built and cached for the life of the process — constructing
+    a PyJWKClient doesn't itself hit the network; it fetches (and caches
+    for its `lifespan`) the JWKS on first actual use. None when
+    SUPABASE_URL isn't configured, since there's nowhere to fetch it from."""
+    global _jwks_client
+    if not settings.SUPABASE_URL:
+        return None
+    if _jwks_client is None:
+        jwks_url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        _jwks_client = PyJWKClient(jwks_url, cache_keys=True, timeout=5)
+    return _jwks_client
 
 
 def decode_supabase_jwt(token: str) -> dict:
@@ -77,17 +85,7 @@ def decode_supabase_jwt(token: str) -> dict:
         decode_kwargs["issuer"] = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
 
     try:
-        if alg in ("ES256", "RS256") and settings.SUPABASE_URL:
-            jwk_client = _get_jwk_client(settings.SUPABASE_URL)
-            signing_key = jwk_client.get_signing_key_from_jwt(token)
-            payload = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=[alg],
-                audience="authenticated",
-                **decode_kwargs,
-            )
-        else:
+        if alg == settings.JWT_ALGORITHM:
             if not settings.JWT_SECRET:
                 raise InvalidTokenError("JWT_SECRET is not configured on the server.")
             payload = jwt.decode(
@@ -97,11 +95,29 @@ def decode_supabase_jwt(token: str) -> dict:
                 audience="authenticated",
                 **decode_kwargs,
             )
+        elif alg in _ASYMMETRIC_ALGORITHMS:
+            jwks_client = _get_jwks_client()
+            if jwks_client is None:
+                raise InvalidTokenError(
+                    "Received an asymmetrically-signed token but SUPABASE_URL is not configured to fetch its signing key."
+                )
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                audience="authenticated",
+                **decode_kwargs,
+            )
+        else:
+            raise InvalidTokenError(f"Unsupported token signing algorithm: {alg!r}.")
+    except InvalidTokenError:
+        raise
     except PyJWTError as exc:
-        logger.info("JWT verification failed: %s - %s", exc.__class__.__name__, str(exc))
+        logger.info("JWT verification failed: %s", exc.__class__.__name__)
         raise InvalidTokenError("Invalid or expired token.") from exc
     except Exception as exc:
-        logger.info("JWT verification failed with unexpected error: %s - %s", exc.__class__.__name__, str(exc))
+        logger.info("JWT verification failed: %s - %s", exc.__class__.__name__, str(exc))
         raise InvalidTokenError("Invalid or expired token.") from exc
 
     if not payload.get("sub"):

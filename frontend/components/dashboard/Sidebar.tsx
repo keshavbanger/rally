@@ -16,9 +16,8 @@ import {
   LogOut,
   ChevronDown,
 } from 'lucide-react';
-import { useGroup } from '@/lib/group/useGroup';
+import { useGroup } from '@/lib/mock/useGroup';
 import { useAuth } from '@/lib/auth/AuthProvider';
-
 
 const SECTIONS = [
   {

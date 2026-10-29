@@ -119,7 +119,7 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
     if redis is not None:
         try:
             computed = await intelligence_engine.compute_current_state(db, redis, trip.id, trip.group_id)
-        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+        except Exception as exc:
             logger.warning("Redis failure computing current state for dashboard (trip %s): %s", trip.id, exc)
             computed = None
 
@@ -129,7 +129,7 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
             route_progress_members, _group_fraction, _trip_arrived = await route_service.get_live_route_progress(
                 db, redis, trip, route
             )
-        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError, Exception) as exc:
+        except Exception as exc:
             logger.warning("Redis failure computing route progress for dashboard (trip %s): %s", trip.id, exc)
             route_progress_members = []
     route_state_by_user = {m.user_id: m.route_state for m in route_progress_members}

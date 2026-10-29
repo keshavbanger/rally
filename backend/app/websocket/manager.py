@@ -19,16 +19,10 @@ not one per WebSocket.
 import asyncio
 import json
 import logging
-<<<<<<< HEAD
-from typing import Dict, Optional, Set
-
-from fastapi import WebSocket
-=======
 from typing import Any, Dict, Optional, Set, Union
 
 from fastapi import WebSocket
 from pydantic import BaseModel
->>>>>>> origin/master
 from redis.asyncio import Redis
 
 from app.core.redis_keys import trip_channel
@@ -44,35 +38,6 @@ class ConnectionManager:
         self._subscriber_tasks: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
 
-<<<<<<< HEAD
-    async def connect(self, redis: Redis, trip_id: str, user_id: str, websocket: WebSocket) -> bool:
-        """Registers the connection. Returns True if this is the user's
-        first live connection for this trip — callers use that to decide
-        whether to publish a presence ONLINE event (a second tab/device
-        connecting shouldn't re-announce someone who's already online)."""
-        async with self._lock:
-            trip_conns = self._connections.setdefault(trip_id, {})
-            user_conns = trip_conns.setdefault(user_id, set())
-            is_first_for_user = len(user_conns) == 0
-            user_conns.add(websocket)
-
-            if trip_id not in self._subscriber_tasks:
-                self._subscriber_tasks[trip_id] = asyncio.create_task(self._subscribe_loop(redis, trip_id))
-
-        return is_first_for_user
-
-    async def disconnect(self, trip_id: str, user_id: str, websocket: WebSocket) -> bool:
-        """Unregisters the connection. Returns True if the user has no
-        other live connections left for this trip (i.e. they should now
-        be announced OFFLINE)."""
-        is_last_for_user = True
-        stop_subscriber = False
-        async with self._lock:
-            trip_conns = self._connections.get(trip_id)
-            if trip_conns is None:
-                return True
-            user_conns = trip_conns.get(user_id)
-=======
     @staticmethod
     def _s(v: Any) -> str:
         return str(v)
@@ -131,22 +96,11 @@ class ConnectionManager:
             if trip_conns is None:
                 return True
             user_conns = trip_conns.get(user_id_str)
->>>>>>> origin/master
             if user_conns is not None:
                 user_conns.discard(websocket)
                 if user_conns:
                     is_last_for_user = False
                 else:
-<<<<<<< HEAD
-                    trip_conns.pop(user_id, None)
-
-            if not trip_conns:
-                self._connections.pop(trip_id, None)
-                stop_subscriber = True
-
-        if stop_subscriber:
-            task = self._subscriber_tasks.pop(trip_id, None)
-=======
                     trip_conns.pop(user_id_str, None)
 
             if not trip_conns:
@@ -155,26 +109,11 @@ class ConnectionManager:
 
         if stop_subscriber:
             task = self._subscriber_tasks.pop(trip_id_str, None)
->>>>>>> origin/master
             if task is not None:
                 task.cancel()
 
         return is_last_for_user
 
-<<<<<<< HEAD
-    async def send_to_user(self, trip_id: str, user_id: str, message: dict) -> None:
-        connections = self._connections.get(trip_id, {}).get(user_id, set())
-        await self._send_to_many(connections, message)
-
-    async def broadcast_to_trip(self, trip_id: str, message: dict, exclude_user_id: Optional[str] = None) -> None:
-        """Local-only send to every connection this process holds for the
-        trip. Called by the subscriber loop for every event published on
-        the trip's channel, from any instance (including this one)."""
-        trip_conns = self._connections.get(trip_id, {})
-        targets: Set[WebSocket] = set()
-        for uid, conns in trip_conns.items():
-            if uid == exclude_user_id:
-=======
     async def send_to_user(self, trip_id: Any, user_id: Any, message: Any) -> None:
         connections = self._connections.get(self._s(trip_id), {}).get(self._s(user_id), set())
         await self._send_to_many(connections, message)
@@ -194,7 +133,6 @@ class ConnectionManager:
         targets: Set[WebSocket] = set()
         for uid, conns in trip_conns.items():
             if exclude_str and uid == exclude_str:
->>>>>>> origin/master
                 continue
             targets |= conns
         await self._send_to_many(targets, message)
@@ -347,4 +285,3 @@ async def publish_event(
             await manager.broadcast_to_trip(str(trip_id), msg_dict, exclude_user_id=exclude_user_id)
     else:
         await manager.broadcast_to_trip(str(trip_id), msg_dict, exclude_user_id=exclude_user_id)
-

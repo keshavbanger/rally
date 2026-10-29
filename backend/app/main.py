@@ -26,7 +26,6 @@ async def lifespan(app: FastAPI):
     logger.info("%s starting up (environment=%s)", settings.PROJECT_NAME, settings.ENVIRONMENT)
     if not settings.DATABASE_URL:
         logger.warning("DATABASE_URL is not set - /health will report the database as not_configured.")
-
     init_redis()
     if settings.REDIS_URL and not await ping_redis():
         logger.warning("Redis is configured but unreachable - live tracking (WebSockets) will be unavailable.")
@@ -35,11 +34,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Graceful shutdown (Part 12), in order: stop background work first
-    # (so nothing is still trying to use Redis/the database once they're
-    # closed below), then close live WebSocket connections so clients get
-    # a clean disconnect instead of the process just vanishing, then
-    # release Redis and the database connection pool last.
+    # Graceful shutdown (Part 12)
     logger.info("%s shutting down", settings.PROJECT_NAME)
     worker_task.cancel()
     try:
@@ -67,7 +62,14 @@ app = FastAPI(
 # Middleware executes outermost-to-innermost in REVERSE of the order added
 # below (Starlette: the last one added wraps everything else). So,
 # outermost -> innermost: RequestID -> CORS -> SecurityHeaders ->
-# GeneralRateLimit -> MaxBodySize -> routes.
+# GeneralRateLimit -> MaxBodySize -> routes. That ordering matters: CORS
+# must wrap the rate limiter (and the body-size check) so a 429/413
+# response still carries Access-Control-* headers (otherwise a browser
+# hides the response body/status from frontend JS entirely), and
+# RequestIDMiddleware must wrap everything so request.state.request_id
+# exists for every error body, including ones these produce themselves.
+# MaxBodySize innermost: reject an oversized payload before it even
+# consumes a slot in the rate limiter's count.
 app.add_middleware(MaxBodySizeMiddleware)
 app.add_middleware(GeneralRateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -79,6 +81,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestIDMiddleware)
+
+# Security / observability middleware (order matters — added last runs first
+# for ASGI middleware, which is the opposite of what you'd expect from a stack).
+# Desired execution order (outer → inner): Security → RequestID → MaxBody → Route
+from app.core.middleware import MaxBodySizeMiddleware, RequestIDMiddleware, SecurityHeadersMiddleware
+from app.core.rate_limit import GeneralRateLimitMiddleware
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(GeneralRateLimitMiddleware)
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(MaxBodySizeMiddleware)
 
 register_exception_handlers(app)
 
@@ -119,16 +132,11 @@ from app.api.metrics import router as metrics_router
 app.include_router(metrics_router)
 
 # ---- WebSocket routes ----
-# app/api/websocket.py: the production Phase-6 WS handler (trip-scoped)
 from app.api.websocket import router as ws_api_router
 app.include_router(ws_api_router, prefix=settings.API_V1_STR)
 
-# app/websocket/router.py: the legacy group-scoped WS handler (kept for
-# backward compatibility with the frontend until fully migrated)
 from app.websocket.router import router as legacy_ws_router
 app.include_router(legacy_ws_router)
-
-# ---- Demo routes (only when explicitly enabled via DEMO_MODE) ----
 if settings.DEMO_MODE:
     from app.api.demo import router as demo_router
     app.include_router(demo_router, prefix=settings.API_V1_STR)

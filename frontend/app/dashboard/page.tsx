@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useGroup } from '@/hooks/useGroup';
-
 import { useLocation } from '@/hooks/useLocation';
 import Topbar from '@/components/dashboard/Topbar';
 import EmptyRallyState from '@/components/dashboard/EmptyRallyState';

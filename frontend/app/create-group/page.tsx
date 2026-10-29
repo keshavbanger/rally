@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { Minus, Plus, Copy, Check, ArrowRight, Users } from 'lucide-react';
 import { buildPreviewGroup } from '@/lib/mock/groupService';
 import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
-
 import LiveMap from '@/components/map/LiveMap';
 
 const DESTINATIONS = ['Solang Valley', 'Rohtang Pass', 'Kasol', 'Manali', 'Leh Ladakh', 'Spiti Valley'];

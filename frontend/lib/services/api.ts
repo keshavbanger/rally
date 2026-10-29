@@ -1,8 +1,7 @@
 import { supabase } from '@/lib/supabase';
 
-const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
-const API_URL = rawApiUrl.replace(/\/api\/v1\/?$/, '') + '/api/v1';
-
+const rawBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+const API_URL = rawBase.endsWith('/api/v1') ? rawBase : `${rawBase}/api/v1`;
 
 let cachedToken: string | null = null;
 let tokenExpiry = 0;

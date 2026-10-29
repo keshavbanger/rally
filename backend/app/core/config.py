@@ -12,7 +12,6 @@ from typing import List, Optional
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-<<<<<<< HEAD
 # Recognized ENVIRONMENT values are "development" | "test" | "production"
 # (see _validate_production_config below) — not enforced as a strict enum
 # on the field itself: an unrecognized value is treated the same as
@@ -28,12 +27,11 @@ _REQUIRED_IN_PRODUCTION = (
     "SUPABASE_SERVICE_ROLE_KEY",
     "JWT_SECRET",
 )
-=======
+
 # Resolve .env path relative to the backend directory so loading is independent
 # of the current working directory (e.g. starting from repo root vs backend/).
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 ENV_FILE = BACKEND_DIR / ".env"
->>>>>>> origin/master
 
 
 class Settings(BaseSettings):
@@ -283,15 +281,8 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     # Comma-separated list of allowed origins, e.g.
-<<<<<<< HEAD
-    # "http://localhost:3000,https://rally.app". CORS_ALLOWED_ORIGINS is
-    # this phase's preferred name and wins when set; FRONTEND_URL is kept
-    # as a fallback so nothing already deployed against it breaks.
-    FRONTEND_URL: str = "http://localhost:3000"
-=======
     # "http://localhost:3000,https://rally.app"
     FRONTEND_URL: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
->>>>>>> origin/master
     CORS_ALLOWED_ORIGINS: Optional[str] = None
 
     @property
@@ -300,7 +291,6 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
     @model_validator(mode="after")
-<<<<<<< HEAD
     def _validate_production_config(self) -> "Settings":
         """Fail fast, with a clear error, rather than let the app start in
         a broken state (Phase 11 — see the README's Configuration section).
@@ -322,23 +312,6 @@ class Settings(BaseSettings):
                     "manipulates trip/GPS data through the real pipeline and must never run against a "
                     "production deployment."
                 )
-        return self
-=======
-    def validate_production_secrets(self) -> "Settings":
-        if self.ENVIRONMENT == "production":
-            required = [
-                ("DATABASE_URL", self.DATABASE_URL),
-                ("REDIS_URL", self.REDIS_URL),
-                ("SUPABASE_URL", self.SUPABASE_URL),
-                ("SUPABASE_ANON_KEY", self.SUPABASE_ANON_KEY),
-                ("SUPABASE_SERVICE_ROLE_KEY", self.SUPABASE_SERVICE_ROLE_KEY),
-                ("JWT_SECRET", self.JWT_SECRET),
-            ]
-            missing = [name for name, val in required if not val]
-            if missing:
-                raise ValueError(f"Missing required production secrets: {', '.join(missing)}")
-            if self.DEMO_MODE:
-                raise ValueError("DEMO_MODE must not be enabled in the production environment.")
         return self
 
     # -------------------------------------------------------------------------
@@ -485,7 +458,6 @@ class Settings(BaseSettings):
     # ever be enabled in a dedicated demo environment, never in real prod.
     DEMO_MODE: bool = False
     DEMO_TICK_INTERVAL_SECONDS: float = 2.0
->>>>>>> origin/master
 
 
 

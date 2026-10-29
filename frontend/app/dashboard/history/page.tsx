@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Search, Compass, Loader2, MapPin, Route as RouteIcon, Shield } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/hooks/useGroup';
-
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import { supabase } from '@/lib/supabase/client';
