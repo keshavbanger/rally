@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { X, LogOut, Check } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import Toggle from '@/components/dashboard/Toggle';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 import { useSettings } from '@/lib/mock/useSettings';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 import { supabase } from '@/lib/supabase';
 import { createPortal } from 'react-dom';
 

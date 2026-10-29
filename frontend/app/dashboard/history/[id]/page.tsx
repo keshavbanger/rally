@@ -8,7 +8,7 @@ import RouteReplayMap from '@/components/map/RouteReplayMap';
 import { getTripSummaryById } from '@/lib/mock/tripHistoryService';
 import type { TripSummary } from '@/lib/mock/types';
 import Topbar from '@/components/dashboard/Topbar';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 
 export default function TripDetailsPage() {
   const { id } = useParams();

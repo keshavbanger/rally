@@ -1,7 +1,7 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 import type { Group } from '@/lib/mock/types';
 import EmptyRallyState from '@/components/dashboard/EmptyRallyState';
 

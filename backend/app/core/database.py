@@ -65,17 +65,41 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 
 def get_db() -> Generator[Session, None, None]:
+    from app.core.errors import AppHTTPException
+    from sqlalchemy.exc import SQLAlchemyError
+
     if SessionLocal is None:
-        raise RuntimeError("Database is not configured. Set DATABASE_URL in your environment.")
+        raise AppHTTPException(
+            status_code=503,
+            code="SERVICE_UNAVAILABLE",
+            detail="Database is not configured. Set DATABASE_URL in backend/.env.",
+        )
     db = SessionLocal()
     try:
         yield db
         db.commit()
+    except SQLAlchemyError as exc:
+        logger.error("Database error during request: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise AppHTTPException(
+            status_code=503,
+            code="SERVICE_UNAVAILABLE",
+            detail="Database connection failed. Please check your DATABASE_URL in backend/.env.",
+        ) from exc
     except Exception:
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
         raise
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 @contextmanager

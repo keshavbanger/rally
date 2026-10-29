@@ -82,9 +82,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         # server log only — the client response below never includes it,
         # in production or otherwise (see the module docstring).
         logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        origin = request.headers.get("origin")
+        headers = {}
+        if origin:
+            from app.core.config import settings
+            if origin in settings.cors_origins or "*" in settings.cors_origins:
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Allow-Credentials"] = "true"
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=build_error_body(code="INTERNAL_ERROR", message="Unable to process request.", request=request),
+            content=build_error_body(code="INTERNAL_ERROR", message=f"Server error: {exc}", request=request),
+            headers=headers,
         )
 
 

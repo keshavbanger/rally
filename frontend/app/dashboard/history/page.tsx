@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Compass, Loader2 } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import type { TripSummary } from '@/lib/mock/types';
 

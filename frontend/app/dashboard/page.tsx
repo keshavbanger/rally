@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 import { useLocation } from '@/hooks/useLocation';
 import Topbar from '@/components/dashboard/Topbar';
 import EmptyRallyState from '@/components/dashboard/EmptyRallyState';
@@ -13,7 +13,7 @@ import { ShieldCheck } from 'lucide-react';
 
 export default function DashboardPage() {
   const { group, loading } = useGroup();
-  const [tripStarted, setTripStarted] = useState(false);
+  const [userStartedTrip, setUserStartedTrip] = useState(false);
   const { isTracking } = useLocation();
 
   if (loading) {
@@ -32,14 +32,16 @@ export default function DashboardPage() {
     );
   }
 
+  const isTripActive = userStartedTrip || Boolean(group.trip?.startedAt);
+
   // STATE 2 — RALLY exists, but no active trip
-  if (!tripStarted) {
+  if (!isTripActive) {
     return (
       <div className="min-h-screen flex flex-col">
         <Topbar group={group} gpsState={isTracking ? 'active' : 'off'} />
         <div className="flex-1 p-4 md:p-6 lg:p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 max-w-7xl mx-auto">
-            <RallyOverview group={group} onStartTrip={() => setTripStarted(true)} />
+            <RallyOverview group={group} onStartTrip={() => setUserStartedTrip(true)} />
             <LocationStatus />
             <div className="flex flex-col gap-5">
               <MemberList members={group.members} />

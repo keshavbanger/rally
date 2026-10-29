@@ -109,13 +109,21 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
     # Redis-only field below simply becomes None instead.
     computed = None
     if redis is not None:
-        computed = await intelligence_engine.compute_current_state(db, redis, trip.id, trip.group_id)
+        try:
+            computed = await intelligence_engine.compute_current_state(db, redis, trip.id, trip.group_id)
+        except Exception as exc:
+            logger.warning("Failed to fetch live Redis state: %s. Falling back to DB.", exc)
+            computed = None
 
     route_progress_members: List[MemberRouteProgress] = []
     if redis is not None and route is not None and route.status == RouteStatus.ACTIVE:
-        route_progress_members, _group_fraction, _trip_arrived = await route_service.get_live_route_progress(
-            db, redis, trip, route
-        )
+        try:
+            route_progress_members, _group_fraction, _trip_arrived = await route_service.get_live_route_progress(
+                db, redis, trip, route
+            )
+        except Exception as exc:
+            logger.warning("Failed to compute live route progress: %s", exc)
+            route_progress_members = []
     route_state_by_user = {m.user_id: m.route_state for m in route_progress_members}
     fraction_by_user = {m.user_id: m.match.route_fraction for m in route_progress_members if m.match}
 

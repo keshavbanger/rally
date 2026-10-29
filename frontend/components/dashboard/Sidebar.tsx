@@ -14,7 +14,7 @@ import {
   LogOut,
   ChevronDown,
 } from 'lucide-react';
-import { useGroup } from '@/lib/mock/useGroup';
+import { useGroup } from '@/lib/group/useGroup';
 import { supabase } from '@/lib/supabase';
 
 const SECTIONS = [

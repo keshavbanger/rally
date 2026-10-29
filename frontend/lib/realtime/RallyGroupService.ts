@@ -123,12 +123,33 @@ class RallyGroupService implements GroupService {
   }
 
   async joinGroup(rawCode: string): Promise<Group> {
-    const apiGroup = await groupsApi.joinGroup(rawCode.trim());
-    const trip = await this.findRelevantTrip(apiGroup.id);
-    if (!trip) {
-      throw new Error('You joined the group, but it has no trip in progress yet.');
+    const code = rawCode.trim().toUpperCase();
+    let apiGroup: ApiGroup;
+    try {
+      apiGroup = await groupsApi.joinGroup(code);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Already an active member of this group — load the group directly
+        const myGroups = await groupsApi.listMyGroups();
+        const existing = myGroups.find((g) => g.join_code === code);
+        if (existing) {
+          apiGroup = await groupsApi.getGroup(existing.id);
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
     }
-    await this.attachToTrip(apiGroup, trip);
+
+    const trip = await this.findRelevantTrip(apiGroup.id);
+    if (trip) {
+      await this.attachToTrip(apiGroup, trip);
+    } else {
+      this.apiGroup = apiGroup;
+      this.rebuildGroup();
+      this.emit();
+    }
     return this.requireGroup();
   }
 
@@ -138,7 +159,19 @@ class RallyGroupService implements GroupService {
 
   async sendSOS(): Promise<void> {
     if (!this.apiTrip) throw new Error('No active trip.');
-    const position = this.livePositions.get(this.currentUserId ?? '');
+    let position = this.livePositions.get(this.currentUserId ?? '');
+    if (position?.latitude == null || position?.longitude == null) {
+      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+        try {
+          const fresh = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000, enableHighAccuracy: true });
+          });
+          position = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude } as any;
+        } catch {
+          // Fall through to error below
+        }
+      }
+    }
     // Never fabricate 0,0 — if we genuinely have no live fix yet, refuse
     // rather than send a meaningless location with an emergency.
     if (position?.latitude == null || position?.longitude == null) {
@@ -206,9 +239,35 @@ class RallyGroupService implements GroupService {
     return () => this.listeners.delete(listener);
   }
 
-  // ---- internal --------------------------------------------------------
-
   private requireGroup(): Group {
+    if (!this.group && this.apiGroup) {
+      this.rebuildGroup();
+    }
+    if (!this.group && this.apiGroup) {
+      const startedAt = this.apiTrip?.started_at ? new Date(this.apiTrip.started_at).getTime() : Date.now();
+      return {
+        id: this.apiGroup.id,
+        name: this.apiGroup.name,
+        destination: this.apiGroup.destination_name ?? this.apiTrip?.destination_name ?? 'Destination',
+        destinationLat: 0,
+        destinationLng: 0,
+        maxMembers: 5,
+        joinCode: this.apiGroup.join_code,
+        createdAt: new Date(this.apiGroup.created_at).getTime(),
+        members: [],
+        alerts: [],
+        route: [],
+        trip: {
+          distanceKm: 0,
+          durationMin: 0,
+          membersCount: 1,
+          alertsCount: 0,
+          startedAt,
+        },
+        risk: { score: 0, level: 'low' },
+        paused: false,
+      };
+    }
     if (!this.group) throw new Error('Group is not attached.');
     return this.group;
   }
@@ -228,6 +287,13 @@ class RallyGroupService implements GroupService {
           await this.attachToTrip(fullGroup, trip);
           return;
         }
+      }
+      if (groups.length > 0) {
+        const fullGroup = await groupsApi.getGroup(groups[0].id);
+        this.apiGroup = fullGroup;
+        this.rebuildGroup();
+        this.emit();
+        return;
       }
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 401)) {
@@ -347,10 +413,10 @@ class RallyGroupService implements GroupService {
   }
 
   private rebuildGroup(memberList?: ApiGroupMember[]): void {
-    if (!this.apiGroup || !this.apiTrip || !this.lastDashboard) return;
+    if (!this.apiGroup || !this.apiTrip) return;
 
     const dashboard = this.lastDashboard;
-    const dashboardByUser = new Map(dashboard.members.map((m) => [m.user_id, m]));
+    const dashboardByUser = dashboard ? new Map(dashboard.members.map((m) => [m.user_id, m])) : new Map();
     const alertsByUser = new Map<string, ApiAlert>();
     for (const alert of this.activeAlerts) {
       if (alert.user_id && (!alertsByUser.has(alert.user_id) || alert.severity === 'CRITICAL')) {
@@ -423,13 +489,13 @@ class RallyGroupService implements GroupService {
       alerts,
       route: [],
       trip: {
-        distanceKm: dashboard.route.distance_meters != null ? dashboard.route.distance_meters / 1000 : 0,
+        distanceKm: dashboard?.route?.distance_meters != null ? dashboard.route.distance_meters / 1000 : 0,
         durationMin: Math.max(0, Math.round((Date.now() - startedAt) / 60_000)),
         membersCount: members.length,
         alertsCount: alerts.length,
         startedAt,
       },
-      risk: { score: dashboard.risk.score, level: riskLevelFromBackend(dashboard.risk.level) },
+      risk: { score: dashboard?.risk?.score ?? 0, level: dashboard ? riskLevelFromBackend(dashboard.risk.level) : 'low' },
       paused: this.group?.paused ?? false,
     };
 
