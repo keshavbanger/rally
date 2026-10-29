@@ -8,8 +8,13 @@ export function listTripAlerts(
   return api.get<ApiAlert[]>(`/trips/${tripId}/alerts`, query);
 }
 
-export function listActiveTripAlerts(tripId: string): Promise<ApiAlert[]> {
-  return api.get<ApiAlert[]>(`/trips/${tripId}/alerts/active`);
+export async function listActiveTripAlerts(tripId: string): Promise<ApiAlert[]> {
+  const res = await api.get<ApiAlert[] | { alerts?: ApiAlert[] }>(`/trips/${tripId}/alerts/active`);
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray((res as { alerts?: ApiAlert[] }).alerts)) {
+    return (res as { alerts: ApiAlert[] }).alerts;
+  }
+  return [];
 }
 
 export function getAlert(alertId: string): Promise<ApiAlert> {

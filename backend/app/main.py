@@ -67,14 +67,7 @@ app = FastAPI(
 # Middleware executes outermost-to-innermost in REVERSE of the order added
 # below (Starlette: the last one added wraps everything else). So,
 # outermost -> innermost: RequestID -> CORS -> SecurityHeaders ->
-# GeneralRateLimit -> MaxBodySize -> routes. That ordering matters: CORS
-# must wrap the rate limiter (and the body-size check) so a 429/413
-# response still carries Access-Control-* headers (otherwise a browser
-# hides the response body/status from frontend JS entirely), and
-# RequestIDMiddleware must wrap everything so request.state.request_id
-# exists for every error body, including ones these produce themselves.
-# MaxBodySize innermost: reject an oversized payload before it even
-# consumes a slot in the rate limiter's count.
+# GeneralRateLimit -> MaxBodySize -> routes.
 app.add_middleware(MaxBodySizeMiddleware)
 app.add_middleware(GeneralRateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -89,6 +82,7 @@ app.add_middleware(RequestIDMiddleware)
 
 register_exception_handlers(app)
 
+# ---- Core routes (always mounted) ----
 app.include_router(health_router, prefix=settings.API_V1_STR)
 app.include_router(auth_router, prefix=settings.API_V1_STR)
 
@@ -101,37 +95,40 @@ app.include_router(trips_router, prefix=settings.API_V1_STR)
 from app.api.locations import router as locations_router
 app.include_router(locations_router, prefix=settings.API_V1_STR)
 
-from app.api.websocket import router as websocket_router
-app.include_router(websocket_router, prefix=settings.API_V1_STR)
-
-from app.api.intelligence import router as intelligence_router
-app.include_router(intelligence_router, prefix=settings.API_V1_STR)
-
 from app.api.alerts import router as alerts_router
 app.include_router(alerts_router, prefix=settings.API_V1_STR)
-
-from app.api.sos import router as sos_router
-app.include_router(sos_router, prefix=settings.API_V1_STR)
-
-from app.api.route import router as route_router
-app.include_router(route_router, prefix=settings.API_V1_STR)
 
 from app.api.analytics import router as analytics_router
 app.include_router(analytics_router, prefix=settings.API_V1_STR)
 
-from app.api.metrics import router as metrics_router
-app.include_router(metrics_router)
+from app.api.intelligence import router as intelligence_router
+app.include_router(intelligence_router, prefix=settings.API_V1_STR)
 
 from app.api.notifications import router as notifications_router
 app.include_router(notifications_router, prefix=settings.API_V1_STR)
 
-# Demo mode (Part 7): the router is only ever *registered* when
-# DEMO_MODE=true — every one of its routes returns a real 404 (no route
-# matches at all) rather than a 403 when disabled, which is what "must be
-# completely disabled in production" means literally. DEMO_MODE=true is
-# itself already refused at startup when ENVIRONMENT=production (see
-# app/core/config.py's _validate_production_config), so this can never
-# combine with a production deployment.
+from app.api.route import router as route_router
+app.include_router(route_router, prefix=settings.API_V1_STR)
+
+from app.api.sos import router as sos_router
+app.include_router(sos_router, prefix=settings.API_V1_STR)
+
+from app.api.metrics import router as metrics_router
+# The Prometheus /metrics endpoint lives at root (no /api/v1 prefix) to match
+# the standard scrape-endpoint convention and existing test expectations.
+app.include_router(metrics_router)
+
+# ---- WebSocket routes ----
+# app/api/websocket.py: the production Phase-6 WS handler (trip-scoped)
+from app.api.websocket import router as ws_api_router
+app.include_router(ws_api_router, prefix=settings.API_V1_STR)
+
+# app/websocket/router.py: the legacy group-scoped WS handler (kept for
+# backward compatibility with the frontend until fully migrated)
+from app.websocket.router import router as legacy_ws_router
+app.include_router(legacy_ws_router)
+
+# ---- Demo routes (only when explicitly enabled via DEMO_MODE) ----
 if settings.DEMO_MODE:
     from app.api.demo import router as demo_router
     app.include_router(demo_router, prefix=settings.API_V1_STR)

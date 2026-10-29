@@ -8,7 +8,8 @@ import { Chrome, Github, ArrowRight } from 'lucide-react';
 import AuthHero from '@/components/auth/AuthHero';
 import SocialButton from '@/components/auth/SocialButton';
 import AuthInput from '@/components/auth/AuthInput';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth/AuthProvider';
+import { supabase } from '@/lib/supabase/client';
 
 const STEPS = [
   { number: 1, text: 'Create your account' },
@@ -16,15 +17,43 @@ const STEPS = [
   { number: 3, text: 'Track your journey live' },
 ];
 
+/**
+ * Maps raw Supabase / network error messages to short, user-friendly strings.
+ * Never reveals whether an email address is already registered to an
+ * unauthenticated caller — duplicate-email detection is handled via the
+ * SignUpOutcome discriminated type in AuthProvider, not here.
+ */
+function mapSignUpError(raw: string): string {
+  const msg = raw.toLowerCase();
+  if (msg.includes('password') && (msg.includes('short') || msg.includes('weak') || msg.includes('characters'))) {
+    return 'Password must be at least 8 characters.';
+  }
+  if (msg.includes('email') && msg.includes('invalid')) {
+    return 'Please enter a valid email address.';
+  }
+  if (msg.includes('rate limit') || msg.includes('too many')) {
+    return 'Too many attempts — please wait a moment and try again.';
+  }
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+    return 'Could not reach the server. Check your connection and try again.';
+  }
+  // Don't expose Supabase internal messages verbatim.
+  return 'Something went wrong. Please try again.';
+}
+
 export default function RegisterPage() {
   const router = useRouter();
+  const { signUpWithPassword } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Separate error (red) and info (neutral/green) banners so a successful
+  // signup asking for email confirmation is never shown in a red error box.
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
   const handleOAuth = async (provider: 'google' | 'github') => {
     await supabase.auth.signInWithOAuth({
@@ -40,25 +69,36 @@ export default function RegisterPage() {
     if (loading) return;
     setLoading(true);
     setError('');
+    setInfo('');
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: `${firstName} ${lastName}`.trim(),
-        }
-      }
-    });
+    const fullName = `${firstName} ${lastName}`.trim();
+    const outcome = await signUpWithPassword(email, password, fullName || undefined);
 
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else if (data.session === null) {
-      setError("Please check your email to confirm your account before logging in!");
-      setLoading(false);
-    } else {
-      router.push('/create-group');
+    switch (outcome.status) {
+      case 'session_ready':
+        // Email confirmation is disabled — user is immediately signed in.
+        // Navigate to onboarding.
+        router.push('/create-group');
+        return; // keep loading spinner while navigating
+
+      case 'confirm_email':
+        // New user (or existing user with email-confirm ON — same message,
+        // intentionally: don't leak whether the address is registered).
+        setInfo('Account created! Check your inbox for a confirmation email, then log in.');
+        setLoading(false);
+        break;
+
+      case 'duplicate':
+        // Email-confirm is OFF and Supabase explicitly rejected the signup.
+        // This is the one case we can safely be specific about.
+        setError('An account with that email already exists. Try logging in instead.');
+        setLoading(false);
+        break;
+
+      case 'error':
+        setError(mapSignUpError(outcome.error));
+        setLoading(false);
+        break;
     }
   };
 
@@ -108,7 +148,18 @@ export default function RegisterPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && <p className="text-red-500 text-sm">{error}</p>}
+            {/* Error banner — only for genuine failures */}
+            {error && (
+              <p role="alert" className="text-red-500 text-sm">
+                {error}
+              </p>
+            )}
+            {/* Info banner — for successful actions that need a follow-up step */}
+            {info && (
+              <p role="status" className="text-green-500 text-sm">
+                {info}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <AuthInput label="First Name" value={firstName} onChange={setFirstName} placeholder="Alex" required />
               <AuthInput label="Last Name" value={lastName} onChange={setLastName} placeholder="Rivera" required />

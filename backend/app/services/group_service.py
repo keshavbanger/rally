@@ -134,7 +134,7 @@ def get_group_members_with_profiles(db: Session, group_id: uuid.UUID):
     """Retrieve all active members with their profiles."""
     stmt = (
         select(GroupMember, Profile)
-        .join(Profile, GroupMember.user_id == Profile.id)
+        .outerjoin(Profile, GroupMember.user_id == Profile.id)
         .where(GroupMember.group_id == group_id, GroupMember.status == MemberStatus.ACTIVE)
     )
     results = db.execute(stmt).all()
@@ -143,8 +143,8 @@ def get_group_members_with_profiles(db: Session, group_id: uuid.UUID):
     for member, profile in results:
         members_data.append({
             "user_id": member.user_id,
-            "name": profile.full_name,
-            "avatar_url": profile.avatar_url,
+            "name": (profile.full_name if profile and profile.full_name else None) or "Member",
+            "avatar_url": profile.avatar_url if profile else None,
             "role": member.role,
             "status": member.status,
             "joined_at": member.joined_at,
@@ -158,6 +158,7 @@ def list_user_groups(db: Session, user_id: uuid.UUID):
         select(Group, GroupMember)
         .join(GroupMember, Group.id == GroupMember.group_id)
         .where(GroupMember.user_id == user_id, GroupMember.status == MemberStatus.ACTIVE)
+        .order_by(Group.created_at.desc())
     )
     results = db.execute(stmt).all()
     

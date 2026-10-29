@@ -6,7 +6,7 @@ import { Users, Copy, Check, MoreVertical, ShieldCheck, MapPin, Search } from 'l
 import RequireGroup from '@/components/dashboard/RequireGroup';
 import Topbar from '@/components/dashboard/Topbar';
 import ConfirmModal from '@/components/dashboard/ConfirmModal';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 import type { Member, Group } from '@/lib/mock/types';
 import { supabase } from '@/lib/supabase';
 

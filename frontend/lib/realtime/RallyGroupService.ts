@@ -35,6 +35,7 @@ import { getMe } from '@/lib/api/auth';
 import * as alertsApi from '@/lib/api/alerts';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as groupsApi from '@/lib/api/groups';
+import * as locationsApi from '@/lib/api/locations';
 import * as routesApi from '@/lib/api/routes';
 import * as sosApi from '@/lib/api/sos';
 import * as tripsApi from '@/lib/api/trips';
@@ -44,8 +45,9 @@ import { TripSocket } from '@/lib/ws/client';
 import type { ConnectionStatus, ServerMessage, TripStateMember } from '@/lib/ws/types';
 import type { AlertItem, AlertType as MockAlertType, CreateGroupInput, Group, Member, RiskAssessment, SafetyStatus, TripSummary } from '@/lib/mock/types';
 import type { GroupService } from '@/lib/mock/groupService';
+import { saveTripSummary } from '@/lib/mock/tripHistoryService';
 
-const REFRESH_INTERVAL_MS = 20_000;
+const REFRESH_INTERVAL_MS = 15_000;
 
 const ALERT_TYPE_MAP: Record<string, MockAlertType> = {
   FALLING_BEHIND: 'separation',
@@ -98,6 +100,7 @@ class RallyGroupService implements GroupService {
   // RECONNECTING/ERROR instead of a hardcoded "Connected" label.
   private connectionStatus: ConnectionStatus = 'DISCONNECTED';
   private connectionListeners = new Set<(status: ConnectionStatus) => void>();
+  private messageListeners = new Set<(message: ServerMessage) => void>();
 
   // ---- GroupService interface --------------------------------------
 
@@ -142,19 +145,33 @@ class RallyGroupService implements GroupService {
       }
     }
 
-    const trip = await this.findRelevantTrip(apiGroup.id);
+    let trip = await this.findRelevantTrip(apiGroup.id);
+    if (!trip) {
+      try {
+        trip = await tripsApi.createTrip(apiGroup.id, { destination_name: apiGroup.destination_name ?? undefined });
+      } catch (tripErr) {
+        console.warn('Could not auto-create trip on join:', tripErr);
+      }
+    }
     if (trip) {
       await this.attachToTrip(apiGroup, trip);
     } else {
-      this.apiGroup = apiGroup;
-      this.rebuildGroup();
-      this.emit();
+      await this.attachGroupWithoutTrip(apiGroup);
     }
     return this.requireGroup();
   }
 
   leaveGroup(): void {
+    if (this.apiGroup) {
+      groupsApi.leaveGroup(this.apiGroup.id).catch(console.error);
+    }
     void this.teardown();
+  }
+
+  async removeMember(memberId: string): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.removeMember(this.apiGroup.id, memberId);
+    await this.refresh();
   }
 
   async sendSOS(): Promise<void> {
@@ -195,6 +212,127 @@ class RallyGroupService implements GroupService {
     void this.resolveAlertAsync(alertId).catch((err) => console.error('Failed to resolve alert', err));
   }
 
+  markAlertAsRead(alertId: string): void {
+    void alertsApi.acknowledgeAlert(alertId).catch((err) => console.error('Failed to acknowledge alert', err));
+  }
+
+  markAllAlertsAsRead(): void {
+    for (const a of this.activeAlerts) {
+      void alertsApi.acknowledgeAlert(a.id).catch(() => {});
+    }
+  }
+
+  async startTrip(): Promise<void> {
+    if (!this.apiTrip && this.apiGroup) {
+      try {
+        const newTrip = await tripsApi.createTrip(this.apiGroup.id, {
+          destination_name: this.group?.destination && this.group.destination !== 'Destination' ? this.group.destination : undefined,
+        });
+        this.apiTrip = newTrip;
+      } catch (err) {
+        console.warn('Failed to auto-create trip before starting:', err);
+      }
+    }
+    if (!this.apiTrip) return;
+    try {
+      if (this.apiTrip.status === 'CREATED') {
+        const started = await tripsApi.startTrip(this.apiTrip.id);
+        this.apiTrip = started;
+      }
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to start trip on backend:', err);
+      await this.refresh();
+    }
+  }
+
+  async setTripRoute(
+    destination: string,
+    destLat: number,
+    destLng: number,
+    route: { lat: number; lng: number }[],
+    distanceMeters: number,
+    durationSeconds: number
+  ): Promise<void> {
+    if (!this.group) return;
+    this.group = {
+      ...this.group,
+      destination,
+      destinationLat: destLat,
+      destinationLng: destLng,
+      route: route.map((p) => ({ lat: p.lat, lng: p.lng })),
+      trip: {
+        ...this.group.trip,
+        distanceKm: Math.round((distanceMeters / 1000) * 10) / 10,
+        durationMin: Math.round(durationSeconds / 60),
+      },
+    };
+    this.emit();
+
+    // Persist to backend if trip exists or can be created
+    if (!this.apiTrip && this.apiGroup) {
+      try {
+        const newTrip = await tripsApi.createTrip(this.apiGroup.id, { destination_name: destination });
+        this.apiTrip = newTrip;
+      } catch (err) {
+        console.warn('Could not auto-create trip for route:', err);
+      }
+    }
+
+    if (this.apiTrip && route.length >= 2) {
+      try {
+        await routesApi.createRoute(this.apiTrip.id, {
+          name: destination,
+          origin_latitude: route[0].lat,
+          origin_longitude: route[0].lng,
+          destination_latitude: destLat,
+          destination_longitude: destLng,
+          coordinates: route.map((p) => [p.lng, p.lat]),
+          estimated_duration_seconds: Math.round(durationSeconds),
+        });
+      } catch (err) {
+        console.warn('Failed to persist route to backend:', err);
+      }
+    }
+  }
+
+  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void {
+    if (this.currentUserId) {
+      const existing = this.livePositions.get(this.currentUserId);
+      this.livePositions.set(this.currentUserId, {
+        user_id: this.currentUserId,
+        name: existing?.name ?? this.group?.members.find((m) => m.id === this.currentUserId)?.name ?? 'You',
+        role: existing?.role ?? (this.group?.members.find((m) => m.id === this.currentUserId)?.role === 'Leader' ? 'LEADER' : 'MEMBER'),
+        latitude: lat,
+        longitude: lng,
+        accuracy: null,
+        speed: speed ?? 0,
+        heading: heading ?? 0,
+        recorded_at: new Date().toISOString(),
+        status: 'ONLINE',
+      });
+      if (this.group) {
+        this.group = {
+          ...this.group,
+          members: this.group.members.map((m) =>
+            m.id === this.currentUserId
+              ? { ...m, lat, lng, speedKmh: speed ? speed * 3.6 : 0, headingDeg: heading ?? 0, online: true }
+              : m
+          ),
+        };
+        this.emit();
+      }
+    }
+
+    this.sendLocationUpdate({
+      latitude: lat,
+      longitude: lng,
+      accuracy: null,
+      speed,
+      heading,
+    });
+  }
+
   /** No backend equivalent — Phase 4-12's trip state machine has no
    * "paused" state, only CREATED/ACTIVE/COMPLETED/CANCELLED (see
    * backend/app/services/trip_service.py). Interpreted here as a
@@ -214,27 +352,78 @@ class RallyGroupService implements GroupService {
   }
 
   async endTrip(): Promise<TripSummary> {
-    if (!this.apiTrip) throw new Error('No active trip to end.');
-    const ended = await tripsApi.endTrip(this.apiTrip.id);
+    if (!this.apiTrip && this.apiGroup) {
+      const found = await this.findRelevantTrip(this.apiGroup.id);
+      if (found) {
+        this.apiTrip = found;
+      }
+    }
+
+    if (!this.apiTrip) {
+      const fallbackTrip: ApiTrip = {
+        id: this.apiGroup?.id ?? this.group?.id ?? 'completed',
+        group_id: this.apiGroup?.id ?? this.group?.id ?? 'completed',
+        status: 'COMPLETED',
+        started_by: this.currentUserId ?? null,
+        started_at: null,
+        ended_at: new Date().toISOString(),
+        destination_name: this.group?.destination ?? 'Destination',
+        distance: this.group?.trip?.distanceKm ?? 0,
+        duration: this.group?.trip?.durationMin ?? 0,
+        safety_score: this.group?.risk?.score ?? 100,
+        created_at: new Date().toISOString(),
+      };
+      const summary = this.buildTripSummary(fallbackTrip, null, null);
+      // Persist to local history so the trip appears immediately on the history page
+      saveTripSummary(summary);
+      await this.teardown();
+      return summary;
+    }
+
+    let ended = this.apiTrip;
+    if (this.apiTrip.status === 'ACTIVE') {
+      try {
+        ended = await tripsApi.endTrip(this.apiTrip.id);
+      } catch (err) {
+        console.warn('Failed to end active trip on backend:', err);
+      }
+    } else if (this.apiTrip.status === 'CREATED') {
+      try {
+        ended = await tripsApi.cancelTrip(this.apiTrip.id);
+      } catch (err) {
+        console.warn('Failed to cancel created trip on backend:', err);
+      }
+    }
+
     const [analytics, insights] = await Promise.all([
       analyticsApi.getTripAnalytics(ended.id).catch(() => null),
       analyticsApi.getTripInsights(ended.id).catch(() => null),
     ]);
     const summary = this.buildTripSummary(ended, analytics, insights);
+    // Persist the rich summary (with analytics + insights) to local history
+    // so the trip appears immediately on the history page without waiting
+    // for the backend list endpoint to update.
+    saveTripSummary(summary);
     await this.teardown();
     return summary;
   }
 
   subscribe(listener: (group: Group | null) => void): () => void {
     this.listeners.add(listener);
-    if (!this.initPromise) {
+    // Always immediately deliver the current state to new subscribers —
+    // if the service already has a group (created/joined before navigation),
+    // the caller gets it synchronously without waiting for init() to finish.
+    listener(this.group);
+
+    if (this.group) {
+      // Group already available: ensure refresh timer is running but don't
+      // re-run the expensive init() flow that would briefly null out the group.
+      if (!this.refreshTimer) {
+        this.refreshTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
+      }
+    } else if (!this.initPromise) {
+      // No group and no pending init: start one.
       this.initPromise = this.init();
-    } else {
-      // A subscriber joining after the first init() already resolved
-      // (e.g. a second component mounting, or navigating to a new page)
-      // needs the CURRENT state right away — otherwise it sees nothing
-      // until the next periodic refresh, up to REFRESH_INTERVAL_MS later.
-      listener(this.group);
     }
     return () => this.listeners.delete(listener);
   }
@@ -281,23 +470,35 @@ class RallyGroupService implements GroupService {
     try {
       const groups = await groupsApi.listMyGroups();
       for (const g of groups) {
-        const trip = await this.findRelevantTrip(g.id);
+        const fullGroup = await groupsApi.getGroup(g.id).catch(() => null);
+        if (!fullGroup) continue;
+
+        let trip = await this.findRelevantTrip(g.id);
+        if (!trip) {
+          // If the group exists in the backend without a trip, auto-create one
+          try {
+            trip = await tripsApi.createTrip(g.id, { destination_name: fullGroup.destination_name ?? undefined });
+          } catch (tripErr) {
+            console.warn('Could not auto-create trip for group', g.id, tripErr);
+          }
+        }
         if (trip) {
-          const fullGroup = await groupsApi.getGroup(g.id);
           await this.attachToTrip(fullGroup, trip);
+          return;
+        } else {
+          // Fallback: attach group state even if no trip exists yet
+          await this.attachGroupWithoutTrip(fullGroup);
           return;
         }
       }
-      if (groups.length > 0) {
-        const fullGroup = await groupsApi.getGroup(groups[0].id);
-        this.apiGroup = fullGroup;
-        this.rebuildGroup();
-        this.emit();
-        return;
-      }
+      this.group = null;
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 401)) {
         console.error('Failed to load current group', err);
+      }
+    } finally {
+      if (!this.group) {
+        this.initPromise = null;
       }
     }
     this.emit();
@@ -328,6 +529,48 @@ class RallyGroupService implements GroupService {
       }
     }
 
+    // Set an immediate baseline group state so requireGroup() succeeds
+    // and callers/UI never see null even before the first refresh completes
+    const startedAt = trip.started_at ? new Date(trip.started_at).getTime() : Date.now();
+    this.group = {
+      id: apiGroup.id,
+      name: apiGroup.name,
+      destination: apiGroup.destination_name ?? trip.destination_name ?? 'Destination',
+      destinationLat: 0,
+      destinationLng: 0,
+      maxMembers: 5,
+      joinCode: apiGroup.join_code,
+      createdAt: new Date(apiGroup.created_at).getTime(),
+      members: [
+        {
+          id: this.currentUserId ?? 'creator',
+          name: 'Leader',
+          role: 'Leader',
+          isCurrentUser: true,
+          online: true,
+          status: 'safe',
+          lat: 0,
+          lng: 0,
+          speedKmh: 0,
+          headingDeg: 0,
+          distanceFromGroupM: 0,
+          lastSeen: 'Just now',
+        },
+      ],
+      alerts: [],
+      route: [],
+      trip: {
+        distanceKm: 0,
+        durationMin: 0,
+        membersCount: 1,
+        alertsCount: 0,
+        startedAt,
+      },
+      risk: { score: 100, level: 'LOW RISK' },
+      paused: false,
+    };
+    this.emit();
+
     await this.refresh();
 
     if (trip.status === 'ACTIVE') {
@@ -335,7 +578,7 @@ class RallyGroupService implements GroupService {
       this.socket.onMessage((message) => this.handleSocketMessage(message));
       this.socket.onStatusChange((status) => {
         this.setConnectionStatus(status);
-        if (status === 'CONNECTED') void this.refresh(); // re-sync after (re)connect — item 37
+        if (status === 'CONNECTED') void this.refresh(true); // force re-sync after (re)connect
       });
       void this.socket.connect();
     } else {
@@ -345,24 +588,90 @@ class RallyGroupService implements GroupService {
     this.refreshTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
   }
 
+  private async attachGroupWithoutTrip(fullGroup: ApiGroup): Promise<void> {
+    await this.teardownSocketAndTimer();
+    this.apiGroup = fullGroup;
+    this.apiTrip = null;
+    this.livePositions.clear();
+
+    const token = await getCurrentAccessToken();
+    if (token) {
+      try {
+        const me = await getMe();
+        this.currentUserId = me.id;
+      } catch {
+        this.currentUserId = null;
+      }
+    }
+
+    const members = await groupsApi.getGroupMembers(fullGroup.id).catch(() => []);
+    this.group = {
+      id: fullGroup.id,
+      name: fullGroup.name,
+      destination: fullGroup.destination_name ?? 'Destination',
+      destinationLat: 0,
+      destinationLng: 0,
+      maxMembers: Math.max(members.length, 5),
+      joinCode: fullGroup.join_code,
+      createdAt: new Date(fullGroup.created_at).getTime(),
+      members: members.map((m) => ({
+        id: m.user_id,
+        name: m.name ?? 'Member',
+        role: m.role === 'LEADER' ? 'Leader' : 'Member',
+        isCurrentUser: m.user_id === this.currentUserId,
+        online: true,
+        status: 'safe',
+        lat: 0,
+        lng: 0,
+        speedKmh: 0,
+        headingDeg: 0,
+        distanceFromGroupM: 0,
+        lastSeen: 'Just now',
+      })),
+      alerts: [],
+      route: [],
+      trip: {
+        distanceKm: 0,
+        durationMin: 0,
+        membersCount: members.length,
+        alertsCount: 0,
+        startedAt: Date.now(),
+      },
+      risk: { score: 100, level: 'LOW RISK' },
+      paused: false,
+    };
+    this.emit();
+  }
+
   private handleSocketMessage(message: ServerMessage): void {
+    // Forward to useRealtime subscribers first, before internal processing,
+    // so UI can react to the raw message while the service updates state.
+    this.messageListeners.forEach((listener) => listener(message));
     switch (message.type) {
       case 'trip_state':
         for (const member of message.data.members) this.livePositions.set(member.user_id, member);
         this.rebuildGroup();
         break;
       case 'location_update': {
-        const existing = this.livePositions.get(message.data.user_id);
-        this.livePositions.set(message.data.user_id, {
-          user_id: message.data.user_id,
+        const payload: any = (message as any).data || message;
+        const userId = payload.user_id || payload.userId;
+        if (!userId) break;
+        const lat = typeof payload.latitude === 'number' ? payload.latitude : parseFloat(payload.latitude);
+        const lng = typeof payload.longitude === 'number' ? payload.longitude : parseFloat(payload.longitude);
+        if (isNaN(lat) || isNaN(lng) || !isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) {
+          break;
+        }
+        const existing = this.livePositions.get(userId);
+        this.livePositions.set(userId, {
+          user_id: userId,
           name: existing?.name ?? null,
           role: existing?.role ?? 'MEMBER',
-          latitude: message.data.latitude,
-          longitude: message.data.longitude,
-          accuracy: message.data.accuracy,
-          speed: message.data.speed,
-          heading: message.data.heading,
-          recorded_at: message.data.recorded_at,
+          latitude: lat,
+          longitude: lng,
+          accuracy: payload.accuracy ?? null,
+          speed: payload.speed ?? null,
+          heading: payload.heading ?? null,
+          recorded_at: payload.recorded_at || payload.timestamp || new Date().toISOString(),
           status: 'ONLINE',
         });
         this.rebuildGroup();
@@ -394,26 +703,45 @@ class RallyGroupService implements GroupService {
     }
   }
 
-  private async refresh(): Promise<void> {
-    if (!this.apiGroup || !this.apiTrip) return;
+  async refresh(force: boolean = false): Promise<void> {
+    if (!this.apiGroup || !this.apiTrip) {
+      await this.init();
+      return;
+    }
+
+    // Disable background HTTP polling while WebSocket is actively connected
+    // and delivering live updates, preventing rate limiting (HTTP 429).
+    if (!force && this.connectionStatus === 'CONNECTED' && this.socket) {
+      return;
+    }
+
     try {
       const [dashboard, members, alerts] = await Promise.all([
-        analyticsApi.getDashboard(this.apiTrip.id),
-        groupsApi.getGroupMembers(this.apiGroup.id),
+        analyticsApi.getDashboard(this.apiTrip.id).catch((err) => {
+          console.warn('Dashboard fetch deferred:', err);
+          return null;
+        }),
+        groupsApi.getGroupMembers(this.apiGroup.id).catch(() => [] as ApiGroupMember[]),
         alertsApi.listActiveTripAlerts(this.apiTrip.id).catch(() => [] as ApiAlert[]),
       ]);
-      this.lastDashboard = dashboard;
-      this.activeAlerts = alerts;
-      this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
+      if (dashboard) {
+        this.lastDashboard = dashboard;
+        this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
+      }
+      this.activeAlerts = Array.isArray(alerts) ? alerts : (alerts as any)?.alerts ?? [];
       this.rebuildGroup(members);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return; // client.ts already redirects
+      if (err instanceof ApiError && err.status === 429) {
+        console.warn('[RallyGroupService] Rate limited (429) during polling, skipping cycle.');
+        return;
+      }
       console.error('Failed to refresh dashboard', err);
     }
   }
 
   private rebuildGroup(memberList?: ApiGroupMember[]): void {
-    if (!this.apiGroup || !this.apiTrip) return;
+    if (!this.apiGroup && !this.group) return;
 
     const dashboard = this.lastDashboard;
     const dashboardByUser = dashboard ? new Map(dashboard.members.map((m) => [m.user_id, m])) : new Map();
@@ -474,28 +802,31 @@ class RallyGroupService implements GroupService {
       };
     });
 
-    const startedAt = this.apiTrip.started_at ? new Date(this.apiTrip.started_at).getTime() : Date.now();
+    const startedAt = this.apiTrip?.started_at ? new Date(this.apiTrip.started_at).getTime() : (this.group?.trip?.startedAt ?? Date.now());
 
     this.group = {
-      id: this.apiGroup.id,
-      name: this.apiGroup.name,
-      destination: this.apiGroup.destination_name ?? this.apiTrip.destination_name ?? 'Destination',
-      destinationLat: 0,
-      destinationLng: 0,
+      id: this.apiGroup?.id ?? this.group?.id ?? '',
+      name: this.apiGroup?.name ?? this.group?.name ?? '',
+      destination: this.apiGroup?.destination_name ?? this.apiTrip?.destination_name ?? this.group?.destination ?? 'Destination',
+      destinationLat: this.group?.destinationLat ?? 0,
+      destinationLng: this.group?.destinationLng ?? 0,
       maxMembers: Math.max(members.length, 5),
-      joinCode: this.apiGroup.join_code,
-      createdAt: new Date(this.apiGroup.created_at).getTime(),
+      joinCode: this.apiGroup?.join_code ?? this.group?.joinCode ?? '',
+      createdAt: this.apiGroup ? new Date(this.apiGroup.created_at).getTime() : (this.group?.createdAt ?? Date.now()),
       members,
       alerts,
-      route: [],
+      route: this.group?.route ?? [],
       trip: {
-        distanceKm: dashboard?.route?.distance_meters != null ? dashboard.route.distance_meters / 1000 : 0,
+        distanceKm: dashboard?.route?.distance_meters != null ? dashboard.route.distance_meters / 1000 : (this.group?.trip?.distanceKm ?? 0),
         durationMin: Math.max(0, Math.round((Date.now() - startedAt) / 60_000)),
         membersCount: members.length,
         alertsCount: alerts.length,
         startedAt,
       },
-      risk: { score: dashboard?.risk?.score ?? 0, level: dashboard ? riskLevelFromBackend(dashboard.risk.level) : 'low' },
+      risk: {
+        score: dashboard?.risk?.score ?? (this.group?.risk?.score ?? 100),
+        level: dashboard?.risk?.level ? riskLevelFromBackend(dashboard.risk.level) : (this.group?.risk?.level ?? 'LOW RISK'),
+      },
       paused: this.group?.paused ?? false,
     };
 
@@ -508,8 +839,13 @@ class RallyGroupService implements GroupService {
     if (!this.apiTrip || !this.group) return;
     if (this.routeLoadedForTrip === this.apiTrip.id) return;
     try {
-      const route = await routesApi.getRoute(this.apiTrip.id);
-      this.routeLoadedForTrip = this.apiTrip.id;
+      const envelope = await routesApi.getRoute(this.apiTrip.id);
+      this.routeLoadedForTrip = this.apiTrip.id; // mark as checked regardless
+      if (!envelope.route) {
+        // No route saved for this trip yet — not an error, just no geometry to draw
+        return;
+      }
+      const route = envelope.route;
       if (!this.group) return;
       this.group = {
         ...this.group,
@@ -519,9 +855,8 @@ class RallyGroupService implements GroupService {
       };
       this.emit();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        this.routeLoadedForTrip = this.apiTrip.id; // no route on this trip — stop asking every refresh
-      }
+      // Only unexpected errors reach here (network failure, auth error, etc.)
+      console.warn('[RallyGroupService] Failed to load route geometry:', err);
     }
   }
 
@@ -594,9 +929,25 @@ class RallyGroupService implements GroupService {
    * A no-op if there's no open socket (trip not ACTIVE, or "paused" —
    * see pauseTrip()'s docstring) rather than falling back to a REST
    * call, which would defeat the point of throttling client-side. */
-  sendLocationUpdate(data: { latitude: number; longitude: number; accuracy: number | null; speed: number | null; heading: number | null }): void {
+  sendLocationUpdate(data: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    speed?: number | null;
+    heading?: number | null;
+    recorded_at?: string | null;
+    timestamp?: number | string | null;
+  }): void {
     if (this.group?.paused) return;
-    this.socket?.sendLocationUpdate(data);
+    const recordedAt = data.recorded_at ?? (data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString());
+    this.socket?.sendLocationUpdate({
+      latitude: data.latitude,
+      longitude: data.longitude,
+      accuracy: data.accuracy ?? null,
+      speed: data.speed ?? null,
+      heading: data.heading ?? null,
+      recorded_at: recordedAt,
+    });
   }
 
   /** The most recent dashboard response backing the current `group` —
@@ -627,10 +978,35 @@ class RallyGroupService implements GroupService {
     listener(this.connectionStatus);
     return () => this.connectionListeners.delete(listener);
   }
+
+  /** Subscribe to raw incoming WebSocket messages. Fires AFTER the service
+   * has already processed each message internally (position/presence/alert
+   * updates), so listeners can react to specific types (e.g. flash an SOS
+   * banner) without re-implementing the service's own logic. */
+  subscribeMessages(listener: (message: ServerMessage) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  }
 }
 
-const rallyGroupServiceInstance = new RallyGroupService();
-export const rallyGroupService: GroupService = rallyGroupServiceInstance;
+interface GlobalWithRallyGroupService {
+  __rally_group_service__?: RallyGroupService;
+}
+
+const globalStore = (typeof globalThis !== 'undefined' ? globalThis : window) as unknown as GlobalWithRallyGroupService;
+
+function getRallyGroupService(): RallyGroupService {
+  if (globalStore.__rally_group_service__) {
+    return globalStore.__rally_group_service__;
+  }
+  const instance = new RallyGroupService();
+  globalStore.__rally_group_service__ = instance;
+  return instance;
+}
+
+const rallyGroupServiceInstance = getRallyGroupService();
+export const rallyGroupService: RallyGroupService = rallyGroupServiceInstance;
+export type { RallyGroupService };
 /** Escape hatch for the one capability (sending GPS) that isn't part of
  * the shared GroupService interface the mock implementation also
  * satisfies — see lib/geo/useTripLocationSharing.ts. */

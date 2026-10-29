@@ -16,6 +16,13 @@ const SEVERITY_CONFIG: Record<
     badgeBg: 'bg-red-500/10 text-red-400 border-red-500/30',
     border: 'border-red-500/30 bg-red-500/[0.04]',
   },
+  high: {
+    label: 'HIGH',
+    icon: AlertTriangle,
+    color: 'text-orange-400',
+    badgeBg: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
+    border: 'border-orange-500/20 bg-orange-500/[0.03]',
+  },
   warning: {
     label: 'WARNING',
     icon: AlertTriangle,
@@ -33,7 +40,7 @@ const SEVERITY_CONFIG: Record<
 };
 
 export default function NeedsAttentionPanel({ alerts }: { alerts: AlertItem[] }) {
-  const activeAlerts = alerts.filter((a) => a.status === 'active');
+  const activeAlerts = (Array.isArray(alerts) ? alerts : []).filter((a) => a.status === 'active');
 
   return (
     <div className="rounded-xl border border-white/10 bg-[#0A0A0C] p-5 space-y-4 flex flex-col justify-between h-full">

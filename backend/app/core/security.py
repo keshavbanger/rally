@@ -26,8 +26,10 @@ against JWT_SECRET.
 """
 
 import logging
+import ssl
 from typing import Optional
 
+import certifi
 import jwt
 from jwt import PyJWKClient, PyJWTError
 
@@ -35,39 +37,37 @@ from app.core.config import settings
 
 logger = logging.getLogger("rally.security")
 
-_ASYMMETRIC_ALGORITHMS = {"ES256", "RS256"}
+_jwk_client: Optional[PyJWKClient] = None
+
+
+def _get_jwk_client(supabase_url: str) -> PyJWKClient:
+    global _jwk_client
+    if _jwk_client is None:
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        _jwk_client = PyJWKClient(jwks_url, ssl_context=ssl_ctx)
+    return _jwk_client
 
 
 class InvalidTokenError(Exception):
     pass
 
 
-_jwks_client: Optional[PyJWKClient] = None
-
-
-def _get_jwks_client() -> Optional[PyJWKClient]:
-    """Lazily built and cached for the life of the process — constructing
-    a PyJWKClient doesn't itself hit the network; it fetches (and caches
-    for its `lifespan`) the JWKS on first actual use. None when
-    SUPABASE_URL isn't configured, since there's nowhere to fetch it from."""
-    global _jwks_client
-    if not settings.SUPABASE_URL:
-        return None
-    if _jwks_client is None:
-        jwks_url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
-        _jwks_client = PyJWKClient(jwks_url, cache_keys=True, timeout=5)
-    return _jwks_client
-
-
 def decode_supabase_jwt(token: str) -> dict:
     """Verifies signature, expiry, audience, and (when SUPABASE_URL is
-    configured) issuer, then returns the decoded claims.
+    configured) issuer, then returns the decoded claims. Supports both
+    asymmetric Supabase signing (ES256 / RS256 via JWKS) and legacy/local
+    symmetric signing (HS256 with JWT_SECRET).
 
     Raises InvalidTokenError on any failure — callers should turn that into
     a 401, not leak the underlying jwt library exception to the client.
     """
-    if not settings.JWT_SECRET:
-        raise InvalidTokenError("JWT_SECRET is not configured on the server.")
+    try:
+        header = jwt.get_unverified_header(token)
+    except Exception as exc:
+        raise InvalidTokenError("Malformed token header.") from exc
+
+    alg = header.get("alg", settings.JWT_ALGORITHM)
 
     decode_kwargs: dict = {}
     if settings.SUPABASE_URL:
@@ -77,27 +77,9 @@ def decode_supabase_jwt(token: str) -> dict:
         decode_kwargs["issuer"] = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
 
     try:
-        alg = jwt.get_unverified_header(token).get("alg")
-    except PyJWTError as exc:
-        logger.info("JWT header parsing failed: %s", exc.__class__.__name__)
-        raise InvalidTokenError("Invalid or expired token.") from exc
-
-    try:
-        if alg == settings.JWT_ALGORITHM:
-            payload = jwt.decode(
-                token,
-                settings.JWT_SECRET,
-                algorithms=[settings.JWT_ALGORITHM],
-                audience="authenticated",
-                **decode_kwargs,
-            )
-        elif alg in _ASYMMETRIC_ALGORITHMS:
-            jwks_client = _get_jwks_client()
-            if jwks_client is None:
-                raise InvalidTokenError(
-                    "Received an asymmetrically-signed token but SUPABASE_URL is not configured to fetch its signing key."
-                )
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
+        if alg in ("ES256", "RS256") and settings.SUPABASE_URL:
+            jwk_client = _get_jwk_client(settings.SUPABASE_URL)
+            signing_key = jwk_client.get_signing_key_from_jwt(token)
             payload = jwt.decode(
                 token,
                 signing_key.key,
@@ -106,18 +88,20 @@ def decode_supabase_jwt(token: str) -> dict:
                 **decode_kwargs,
             )
         else:
-            raise InvalidTokenError(f"Unsupported token signing algorithm: {alg!r}.")
-    except InvalidTokenError:
-        raise
+            if not settings.JWT_SECRET:
+                raise InvalidTokenError("JWT_SECRET is not configured on the server.")
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET,
+                algorithms=[settings.JWT_ALGORITHM],
+                audience="authenticated",
+                **decode_kwargs,
+            )
     except PyJWTError as exc:
-        logger.info("JWT verification failed: %s", exc.__class__.__name__)
+        logger.info("JWT verification failed: %s - %s", exc.__class__.__name__, str(exc))
         raise InvalidTokenError("Invalid or expired token.") from exc
     except Exception as exc:
-        # A JWKS fetch/parse failure (network error, unknown kid, bad
-        # response) surfaces from PyJWKClient as assorted non-PyJWTError
-        # exceptions — a token this server can't verify is still just a
-        # 401, never a raw 500.
-        logger.info("JWT verification failed while resolving its signing key: %s", exc.__class__.__name__)
+        logger.info("JWT verification failed with unexpected error: %s - %s", exc.__class__.__name__, str(exc))
         raise InvalidTokenError("Invalid or expired token.") from exc
 
     if not payload.get("sub"):

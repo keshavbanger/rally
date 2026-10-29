@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 MIN_ROUTE_COORDINATES = 2
 MAX_ROUTE_COORDINATES = 5000  # generous ceiling against an accidentally-enormous polyline
 
+_NO_ROUTE_MESSAGE = "No route plotted yet"
+
+
 
 class RouteCreate(BaseModel):
     """POST /trips/{trip_id}/route body. `coordinates` is GeoJSON-order
@@ -81,3 +84,16 @@ class RouteProgressResponse(BaseModel):
     trip_arrived: bool
     leader: Optional[RouteMemberProgress] = None
     members: List[RouteMemberProgress]
+
+
+class RouteOrEmpty(BaseModel):
+    """Wrapper returned by GET /trips/{trip_id}/route.
+
+    When the trip has no route yet `route` is None and `message` explains
+    why — the HTTP status is always 200 so clients don't have to treat the
+    "no route" case as an error (see app/api/route.py's get_route_endpoint).
+    When a route exists, `route` is the full RouteResponse and `message` is
+    None."""
+
+    route: Optional[RouteResponse] = None
+    message: Optional[str] = None

@@ -27,6 +27,10 @@ export function listMyTripHistory(query: TripHistoryQuery = {}): Promise<TripHis
   return api.get<TripHistoryResponse>('/users/me/trips', query);
 }
 
+export function getTripsHistory(query: TripHistoryQuery = {}): Promise<TripHistoryResponse> {
+  return api.get<TripHistoryResponse>('/trips/history', query);
+}
+
 export function listGroupTripHistory(groupId: string, query: TripHistoryQuery = {}): Promise<TripHistoryResponse> {
   return api.get<TripHistoryResponse>(`/groups/${groupId}/trips`, query);
 }

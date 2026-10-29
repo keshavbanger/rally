@@ -7,10 +7,10 @@ import RequireGroup from '@/components/dashboard/RequireGroup';
 import Topbar from '@/components/dashboard/Topbar';
 import LiveMap from '@/components/map/LiveMap';
 import ConfirmModal from '@/components/dashboard/ConfirmModal';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 import { useLocation } from '@/hooks/useLocation';
 import type { Group } from '@/lib/mock/types';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth/AuthProvider';
 
 // Mock function to format duration
 const formatDuration = (min: number) => {
@@ -22,31 +22,58 @@ const formatDuration = (min: number) => {
 
 function TripContent({ group }: { group: Group }) {
   const router = useRouter();
-  const { location, isTracking, error: locError } = useLocation();
+  const { user } = useAuth();
+  const { location, isTracking, error: locError, startTracking, stopTracking } = useLocation();
+
+  // Auto-start GPS tracking as soon as the trip page mounts
+  useEffect(() => {
+    startTracking();
+    return () => {
+      // Don't stop tracking on unmount — let the user control it,
+      // but stop sending position updates to the service.
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pipe every GPS fix into the group service → updates live map marker
+  useEffect(() => {
+    if (location && isTracking) {
+      groupService.updateMyPosition(
+        location.latitude,
+        location.longitude,
+        location.speed,
+        location.heading,
+      );
+    }
+  }, [location, isTracking]);
   const [showEndModal, setShowEndModal] = useState(false);
   const [ending, setEnding] = useState(false);
-  const [actualName, setActualName] = useState('User');
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setActualName(user.user_metadata?.full_name || user.user_metadata?.name || 'User');
-      }
-    });
-  }, []);
+  const actualName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'User';
 
   const me = group.members.find((m) => m.isCurrentUser);
 
   const handleEndTrip = async () => {
     setEnding(true);
-    await groupService.endTrip();
-    router.push('/dashboard/history'); // Note: or trip-summary
+    try {
+      const summary = await groupService.endTrip();
+      if (summary?.id && summary.id !== 'completed') {
+        router.push(`/dashboard/trip-summary?id=${summary.id}`);
+      } else {
+        router.push('/dashboard/history');
+      }
+    } catch (err) {
+      console.warn('Failed to end trip:', err);
+      router.push('/dashboard/history');
+    } finally {
+      setEnding(false);
+    }
   };
 
   const isActive = !group.paused;
   
   // Calculate mock elapsed/distance based on group
-  const elapsedMin = Math.round((Date.now() - group.trip.startedAt) / 60000) || 0;
+  const elapsedMin = Math.round((Date.now() - (group.trip?.startedAt ?? Date.now())) / 60000) || 0;
   
   const renderGpsState = () => {
     if (locError) return { text: 'GPS Unavailable', color: 'text-red-400', dot: 'bg-red-400' };
@@ -94,7 +121,10 @@ function TripContent({ group }: { group: Group }) {
             )}
             <LiveMap 
               group={group} 
+              route={group.route && group.route.length > 0 ? group.route : null}
               routeAlternatives={group.route && group.route.length > 0 ? [{ id: 'active', coordinates: group.route, selected: true }] : undefined}
+              showNoRoutePrompt={true}
+              onSetDestination={() => router.push('/dashboard/route')}
             />
           </div>
 
@@ -119,11 +149,11 @@ function TripContent({ group }: { group: Group }) {
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Distance</p>
-                        <p className="text-sm font-medium text-foreground">{group.trip.distanceKm} km</p>
+                        <p className="text-sm font-medium text-foreground">{group.trip?.distanceKm ?? 0} km</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Estimated time</p>
-                        <p className="text-sm font-medium text-foreground">{formatDuration(group.trip.durationMin || 0)}</p>
+                        <p className="text-sm font-medium text-foreground">{formatDuration(group.trip?.durationMin || 0)}</p>
                       </div>
                     </>
                   ) : (

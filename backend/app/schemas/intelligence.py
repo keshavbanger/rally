@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import IntelligenceEventType, IntelligenceSeverity
 
@@ -24,6 +24,8 @@ class MemberIntelligenceState(BaseModel):
     is_isolated: bool
     is_falling_behind: bool
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class IntelligenceEventResponse(BaseModel):
     id: uuid.UUID
@@ -36,12 +38,16 @@ class IntelligenceEventResponse(BaseModel):
     resolved_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class TripIntelligenceResponse(BaseModel):
     trip_id: uuid.UUID
     group_state: str
     members: List[MemberIntelligenceState]
     active_events: List[IntelligenceEventResponse]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class IntelligenceEventQuery(BaseModel):

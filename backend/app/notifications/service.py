@@ -111,17 +111,48 @@ def notify_many(
     if given, is called as `dedup_key_fn(user_id)` — needed because a
     dedup key that's meant to be per-user must actually vary per user,
     not reuse the same string for everyone (which would make every user
-    after the first a no-op)."""
-    created = []
-    for user_id in user_ids:
-        dedup_key = dedup_key_fn(user_id) if dedup_key_fn else None
+    after the first a no-op).
+
+    Bulk-inserts all rows in ONE commit (one round-trip regardless of
+    group size). On a dedup violation (IntegrityError) it rolls back and
+    falls back to inserting each row individually so successfully-inserted
+    notifications are not lost."""
+    user_id_list = list(user_ids)
+    if not user_id_list:
+        return []
+
+    rows: List[Notification] = []
+    for uid in user_id_list:
+        dedup_key = dedup_key_fn(uid) if dedup_key_fn else None
+        rows.append(Notification(
+            user_id=uid, trip_id=trip_id, type=type, title=title,
+            message=message, severity=severity, dedup_key=dedup_key,
+            notification_metadata=metadata or {},
+        ))
+
+    db.add_all(rows)
+    try:
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+    except IntegrityError:
+        # At least one dedup constraint fired — fall back to per-row inserts
+        # so non-conflicting rows are still written.
+        db.rollback()
+
+    created: List[Notification] = []
+    for uid in user_id_list:
+        dedup_key = dedup_key_fn(uid) if dedup_key_fn else None
         result = notify(
-            db, user_id=user_id, type=type, title=title, message=message, severity=severity,
-            trip_id=trip_id, dedup_key=dedup_key, metadata=metadata,
+            db, user_id=uid, type=type, title=title, message=message,
+            severity=severity, trip_id=trip_id, dedup_key=dedup_key,
+            metadata=metadata,
         )
         if result is not None:
             created.append(result)
     return created
+
 
 
 def notify_safely(db: Session, **kwargs) -> Optional[Notification]:

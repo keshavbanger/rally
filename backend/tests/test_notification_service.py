@@ -41,6 +41,10 @@ class FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
+    def add_all(self, objs):
+        for obj in objs:
+            self.added.append(obj)
+
     def scalars(self, stmt):
         return _ScalarResult(self._existing)
 

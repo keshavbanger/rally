@@ -16,7 +16,7 @@ from app.models.group_member import GroupMember
 from app.models.trip import Trip
 from app.schemas.location import LocationCreate
 from app.services import location_service
-from app.redis.client import get_redis
+from app.core.redis import get_redis
 from app.redis.state import (
     set_member_online,
     set_member_offline,
@@ -81,12 +81,22 @@ async def websocket_endpoint(
 
     # 3. Connection accepted
     await manager.connect(group_id, user_id, websocket)
-    redis_client_generator = get_redis()
-    redis_client = await anext(redis_client_generator)
+    redis_client = None
+    redis_gen = None
+    try:
+        redis_res = get_redis()
+        if hasattr(redis_res, "__anext__"):
+            redis_gen = redis_res
+            redis_client = await anext(redis_gen)
+        else:
+            redis_client = redis_res
+    except (RuntimeError, StopAsyncIteration):
+        redis_client = None
 
     try:
         # Mark online
-        await set_member_online(redis_client, group_id, user_id)
+        if redis_client is not None:
+            await set_member_online(redis_client, group_id, user_id)
 
         # Broadcast online status
         await manager.broadcast_to_group(
@@ -102,7 +112,7 @@ async def websocket_endpoint(
             ).first()
             trip_id = active_trip.id if active_trip else uuid.UUID(int=0)
             
-        group_state = await get_group_live_state(redis_client, group_id)
+        group_state = await get_group_live_state(redis_client, group_id) if redis_client is not None else []
         await manager.send_to_user(
             group_id, user_id,
             GroupStateMessage(data=GroupStateData(group_id=group_id, trip_id=trip_id, members=group_state))
@@ -158,20 +168,23 @@ async def websocket_endpoint(
                         # Don't crash, just proceed to update live state if possible
 
                 # Update live state in Redis
-                state = await get_member_state(redis_client, group_id, user_id) or {}
-                state.update({
-                    "user_id": str(user_id),
-                    "trip_id": str(active_trip.id),
-                    "latitude": msg.data.latitude,
-                    "longitude": msg.data.longitude,
-                    "accuracy": msg.data.accuracy,
-                    "speed": msg.data.speed,
-                    "heading": msg.data.heading,
-                    "recorded_at": msg.data.recorded_at.isoformat() if msg.data.recorded_at else datetime.now(timezone.utc).isoformat(),
-                    "connection_state": "ONLINE",
-                    "last_seen": datetime.now(timezone.utc).isoformat()
-                })
-                await set_member_state(redis_client, group_id, user_id, state)
+                if redis_client is not None:
+                    state = await get_member_state(redis_client, group_id, user_id) or {}
+                    state.update({
+                        "user_id": str(user_id),
+                        "trip_id": str(active_trip.id),
+                        "latitude": msg.data.latitude,
+                        "longitude": msg.data.longitude,
+                        "accuracy": msg.data.accuracy,
+                        "speed": msg.data.speed,
+                        "heading": msg.data.heading,
+                        "recorded_at": msg.data.recorded_at.isoformat() if msg.data.recorded_at else datetime.now(timezone.utc).isoformat(),
+                        "connection_state": "ONLINE",
+                        "last_seen": datetime.now(timezone.utc).isoformat()
+                    })
+                    await set_member_state(redis_client, group_id, user_id, state)
+                else:
+                    state = {"last_seen": datetime.now(timezone.utc).isoformat()}
 
                 # Broadcast to group
                 out_msg = OutgoingLocationUpdateMessage(
@@ -184,10 +197,23 @@ async def websocket_endpoint(
                 await manager.broadcast_to_group(group_id, out_msg, exclude_user_id=user_id)
 
     except WebSocketDisconnect:
-        is_last = manager.disconnect(group_id, user_id, websocket)
-        if is_last:
-            await set_member_offline(redis_client, group_id, user_id)
-            await manager.broadcast_to_group(
-                group_id,
-                MemberStatusMessage(data=MemberStatusData(user_id=user_id, status="OFFLINE"))
-            )
+        pass
+    except Exception as exc:
+        logger.exception("Error in websocket connection for group %s user %s: %s", group_id, user_id, exc)
+    finally:
+        try:
+            is_last = await manager.disconnect(group_id, user_id, websocket)
+            if is_last and redis_client is not None:
+                await set_member_offline(redis_client, group_id, user_id)
+                await manager.broadcast_to_group(
+                    group_id,
+                    MemberStatusMessage(data=MemberStatusData(user_id=user_id, status="OFFLINE"))
+                )
+        except Exception as exc:
+            logger.exception("Error disconnecting websocket for group %s user %s: %s", group_id, user_id, exc)
+        finally:
+            if redis_gen is not None:
+                try:
+                    await redis_gen.aclose()
+                except Exception as exc:
+                    logger.warning("Error closing redis generator: %s", exc)

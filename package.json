@@ -9,12 +9,16 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=frontend",
     "build:web": "npm run build --workspace=frontend",
-    "dev:api": "cd backend && venv\\Scripts\\activate.ps1 ; uvicorn app.main:app --reload --port 8000",
-    "dev:backend": "cd backend && venv\\Scripts\\activate.ps1 ; uvicorn app.main:app --reload --port 8000",
-    "test:api": "cd backend && venv\\Scripts\\activate.ps1 ; pytest tests/",
+    "dev:api": "cd backend && (test -f venv/bin/uvicorn && ./venv/bin/uvicorn app.main:app --reload --port 8000 || uvicorn app.main:app --reload --port 8000)",
+    "dev:backend": "cd backend && (test -f venv/bin/uvicorn && ./venv/bin/uvicorn app.main:app --reload --port 8000 || uvicorn app.main:app --reload --port 8000)",
+    "test:api": "cd backend && (test -f venv/bin/pytest && ./venv/bin/pytest tests/ || pytest tests/)",
     "build": "npm run build --workspaces"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0"
   }
 }

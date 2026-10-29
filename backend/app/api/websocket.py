@@ -168,7 +168,10 @@ async def trip_websocket(websocket: WebSocket, trip_id: uuid.UUID) -> None:
             metrics.increment("websocket_disconnects_total")
             logger.info("WebSocket disconnected: trip_id=%s user_id=%s", trip_id_str, user_id_str)
             if is_last_connection:
-                await presence_service.clear_presence(redis, ctx.trip_id, ctx.user_id)
+                try:
+                    await presence_service.clear_presence(redis, ctx.trip_id, ctx.user_id)
+                except Exception:
+                    logger.warning("Failed to clear presence on disconnect for trip %s", trip_id_str)
                 try:
                     await publish_event(
                         redis, trip_id_str, build_presence_update(ctx.user_id, PresenceStatus.OFFLINE)

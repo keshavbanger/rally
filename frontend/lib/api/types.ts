@@ -77,14 +77,32 @@ export interface ApiTrip {
   created_at: string;
 }
 
+export interface TripHistoryRoute {
+  id: string;
+  name: string | null;
+  origin_latitude: number;
+  origin_longitude: number;
+  destination_latitude: number;
+  destination_longitude: number;
+  distance_meters: number;
+  estimated_duration_seconds: number | null;
+  status: string;
+  coordinates: number[][];
+}
+
 export interface TripHistoryItem {
   trip_id: string;
   name: string | null;
+  destination_name?: string | null;
   status: TripStatus;
   started_at: string | null;
   ended_at: string | null;
   member_count: number;
   distance_meters: number | null;
+  distance?: number | null;
+  duration?: number | null;
+  safety_score?: number | null;
+  route?: TripHistoryRoute | null;
 }
 
 export interface TripHistoryResponse {
@@ -147,6 +165,12 @@ export interface ApiRoute {
   status: RouteStatus;
   created_at: string;
   updated_at: string;
+}
+
+/** Envelope returned by GET /trips/{trip_id}/route (always HTTP 200). */
+export interface ApiRouteOrEmpty {
+  route: ApiRoute | null;
+  message: string | null;
 }
 
 export interface RouteMemberProgress {

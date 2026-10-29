@@ -9,6 +9,7 @@ import { useGroup } from '@/lib/group/useGroup';
 import { useSettings } from '@/lib/mock/useSettings';
 import { groupService } from '@/lib/group/groupService';
 import { supabase } from '@/lib/supabase';
+import { updateMe } from '@/lib/api/auth';
 import { createPortal } from 'react-dom';
 
 export default function SettingsPage() {
@@ -61,6 +62,12 @@ export default function SettingsPage() {
     const { error } = await supabase.auth.updateUser({
       data: { full_name: trimmed }
     });
+
+    try {
+      await updateMe({ full_name: trimmed });
+    } catch (apiErr) {
+      console.warn('Backend profile update deferred:', apiErr);
+    }
 
     setIsSaving(false);
 

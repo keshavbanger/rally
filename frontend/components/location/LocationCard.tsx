@@ -1,14 +1,18 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useLocation, getLocationQuality } from '@/hooks/useLocation';
 import { Play, Square, AlertTriangle, CheckCircle2, Crosshair, MapPin } from 'lucide-react';
-import { groupService } from '@/lib/mock/groupService';
+import { groupService } from '@/lib/group/groupService';
 
 export default function LocationCard() {
   const { location, isTracking, error, permissionState, startTracking, stopTracking } = useLocation();
+  const lastPosRef = useRef<string>('');
 
   // Wire it up to our backend group service when location changes!
   useEffect(() => {
     if (location && isTracking) {
+      const posKey = `${location.latitude}:${location.longitude}:${location.speed}:${location.heading}`;
+      if (lastPosRef.current === posKey) return;
+      lastPosRef.current = posKey;
       groupService.updateMyPosition(
         location.latitude,
         location.longitude,

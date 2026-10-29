@@ -1,29 +1,92 @@
 'use client';
 
-import 'leaflet/dist/leaflet.css';
+/**
+ * TripReplayPlayer – Google Maps version for RALLY.
+ *
+ * Plays back a completed trip frame-by-frame using data from the backend
+ * GET /trips/{trip_id}/replay endpoint. Member positions animate on a
+ * Google Map in dark mode.
+ */
+
 import { useEffect, useMemo, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
+import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap } from '@vis.gl/react-google-maps';
 import { Play, Pause, RotateCcw, Loader2, AlertCircle } from 'lucide-react';
 import { getTripReplay } from '@/lib/api/replay';
 import { getTrip } from '@/lib/api/trips';
 import { getGroupMembers } from '@/lib/api/groups';
 import { friendlyErrorMessage } from '@/lib/api/errors';
 import type { TripReplay } from '@/lib/api/types';
-
-const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
-const Popup = dynamic(() => import('react-leaflet').then((m) => m.Popup), { ssr: false });
-const MapBridge = dynamic(() => import('@/components/map/MapBridge'), { ssr: false });
+import { hasGoogleMapsKey, GOOGLE_MAPS_API_KEY } from '@/lib/services/googleMaps';
 
 const SPEEDS = [0.5, 1, 2, 4] as const;
-const BASE_TICK_MS = 700; // wall-clock time per frame at 1x — not real trip time (item 29: backend-sampled frames, UI just steps through them)
+const BASE_TICK_MS = 700;
 
-/**
- * Play/Pause/Restart/Timeline/Speed replay of a completed trip, driven
- * entirely by the backend's sampled `GET /trips/{trip_id}/replay` frames
- * — never raw per-second GPS history (Phase 13, item 29).
- */
+// ─── Inner component (needs Map context) ─────────────────────────────────────
+
+function ReplayMapContent({
+  frame,
+  memberNames,
+}: {
+  frame: TripReplay['timeline'][number] | null;
+  memberNames: Record<string, string>;
+}) {
+  const map = useMap();
+  const [activePopup, setActivePopup] = useState<string | null>(null);
+  const didFit = useRef(false);
+
+  const positions = frame?.members.filter((m) => m.latitude != null && m.longitude != null) ?? [];
+
+  useEffect(() => {
+    if (!map || positions.length === 0 || didFit.current) return;
+    map.setCenter({ lat: positions[0].latitude, lng: positions[0].longitude });
+    map.setZoom(14);
+    didFit.current = true;
+  }, [map, positions]);
+
+  return (
+    <>
+      <Map
+        defaultCenter={{ lat: 19.076, lng: 72.877 }}
+        defaultZoom={13}
+        mapId="rally-replay-player"
+        disableDefaultUI
+        gestureHandling="greedy"
+        style={{ width: '100%', height: '100%' }}
+        colorScheme="DARK"
+      />
+
+      {positions.map((m) => {
+        const name = memberNames[m.user_id] ?? 'Member';
+        return (
+          <AdvancedMarker
+            key={m.user_id}
+            position={{ lat: m.latitude, lng: m.longitude }}
+            onClick={() => setActivePopup(m.user_id)}
+          >
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%',
+              background: '#0A0A0A', border: '2px solid #19BFFF',
+              color: '#fff', fontSize: 10, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 0 8px #19BFFF',
+            }}>
+              {name.charAt(0).toUpperCase()}
+            </div>
+            {activePopup === m.user_id && (
+              <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: m.latitude, lng: m.longitude }}>
+                <div style={{ color: '#000', fontSize: 12, fontWeight: 600 }}>{name}</div>
+                {m.movement_state && <div style={{ color: '#888', fontSize: 11 }}>{m.movement_state}</div>}
+              </InfoWindow>
+            )}
+          </AdvancedMarker>
+        );
+      })}
+    </>
+  );
+}
+
+// ─── Root export ──────────────────────────────────────────────────────────────
+
 export default function TripReplayPlayer({ tripId }: { tripId: string }) {
   const [replay, setReplay] = useState<TripReplay | null>(null);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -33,13 +96,6 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
-  const [mounted, setMounted] = useState(false);
-  const [L, setL] = useState<any>(null);
-
-  useEffect(() => {
-    setMounted(true);
-    import('leaflet').then((mod) => setL(mod.default));
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,20 +108,13 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
         try {
           const trip = await getTrip(tripId);
           const members = await getGroupMembers(trip.group_id);
-          if (!cancelled) setMemberNames(Object.fromEntries(members.map((m) => [m.user_id, m.name ?? 'Member'])));
-        } catch {
-          // Names are a display nicety only — replay still works without them.
-        }
+          if (!cancelled)
+            setMemberNames(Object.fromEntries(members.map((m) => [m.user_id, m.name ?? 'Member'])));
+        } catch { /* Names are display-only; replay still works without them */ }
       })
-      .catch((err) => {
-        if (!cancelled) setError(friendlyErrorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch((err) => { if (!cancelled) setError(friendlyErrorMessage(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tripId]);
 
   const frameCount = replay?.timeline.length ?? 0;
@@ -74,10 +123,7 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
     if (!playing || frameCount === 0) return;
     const interval = setInterval(() => {
       setFrameIndex((i) => {
-        if (i >= frameCount - 1) {
-          setPlaying(false);
-          return i;
-        }
+        if (i >= frameCount - 1) { setPlaying(false); return i; }
         return i + 1;
       });
     }, BASE_TICK_MS / speed);
@@ -85,17 +131,6 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
   }, [playing, speed, frameCount]);
 
   const frame = replay?.timeline[frameIndex] ?? null;
-
-  const memberIcon = useMemo(() => {
-    if (!L) return null;
-    return (hex: string, label: string) =>
-      L.divIcon({
-        className: '',
-        html: `<div style="width:24px;height:24px;border-radius:50%;background:#0A0A0A;border:2px solid ${hex};color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px ${hex};">${label.charAt(0).toUpperCase()}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
-  }, [L]);
 
   if (loading) {
     return (
@@ -122,38 +157,20 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
     );
   }
 
-  const positions = frame?.members.filter((m) => m.latitude != null && m.longitude != null) ?? [];
-  const center: [number, number] = positions.length > 0 ? [positions[0].latitude, positions[0].longitude] : [0, 0];
+  const mapBlock = hasGoogleMapsKey() ? (
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+      <ReplayMapContent frame={frame} memberNames={memberNames} />
+    </APIProvider>
+  ) : (
+    <div className="w-full h-full flex items-center justify-center bg-card text-xs text-muted-foreground text-center px-4">
+      Add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to view the replay map.
+    </div>
+  );
 
   return (
     <div className="space-y-3">
       <div className="relative w-full h-[360px] rounded-2xl overflow-hidden border border-border">
-        {!mounted || !L ? (
-          <div className="w-full h-full flex items-center justify-center bg-card text-muted-foreground">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-        ) : (
-          <MapContainer center={center} zoom={13} zoomControl={false} scrollWheelZoom style={{ width: '100%', height: '100%' }}>
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              className="map-tiles-dark"
-            />
-            <MapBridge
-              onReady={(map) => {
-                if (positions.length > 0) map.setView(center, 14, { animate: false });
-              }}
-            />
-            {positions.map((m) => (
-              <Marker key={m.user_id} position={[m.latitude, m.longitude]} icon={memberIcon?.('#19BFFF', memberNames[m.user_id] ?? 'Member')}>
-                <Popup>
-                  <div className="text-xs font-semibold">{memberNames[m.user_id] ?? 'Member'}</div>
-                  {m.movement_state && <div className="text-[11px] text-neutral-500">{m.movement_state}</div>}
-                </Popup>
-              </Marker>
-            ))}
-          </MapContainer>
-        )}
+        {mapBlock}
       </div>
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
@@ -166,10 +183,7 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
           </button>
           <button
-            onClick={() => {
-              setFrameIndex(0);
-              setPlaying(false);
-            }}
+            onClick={() => { setFrameIndex(0); setPlaying(false); }}
             className="w-9 h-9 rounded-full border border-border text-foreground flex items-center justify-center hover:bg-white/5 transition-colors shrink-0"
             aria-label="Restart"
           >
@@ -181,10 +195,7 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
             min={0}
             max={frameCount - 1}
             value={frameIndex}
-            onChange={(e) => {
-              setPlaying(false);
-              setFrameIndex(Number(e.target.value));
-            }}
+            onChange={(e) => { setPlaying(false); setFrameIndex(Number(e.target.value)); }}
             className="flex-1 accent-rally-blue"
           />
 
@@ -194,7 +205,9 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
                 key={s}
                 onClick={() => setSpeed(s)}
                 className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
-                  speed === s ? 'bg-rally-blue/15 border-rally-blue/40 text-rally-blue' : 'border-border text-muted-foreground hover:text-foreground'
+                  speed === s
+                    ? 'bg-rally-blue/15 border-rally-blue/40 text-rally-blue'
+                    : 'border-border text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {s}x
@@ -204,7 +217,9 @@ export default function TripReplayPlayer({ tripId }: { tripId: string }) {
         </div>
 
         <p className="text-[11px] text-muted-foreground font-mono">
-          {frame ? new Date(frame.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—'}
+          {frame
+            ? new Date(frame.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+            : '—'}
           {' · '}Frame {frameIndex + 1} / {frameCount}
         </p>
       </div>

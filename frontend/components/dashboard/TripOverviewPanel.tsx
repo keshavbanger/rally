@@ -27,9 +27,15 @@ export default function TripOverviewPanel({ group }: { group: Group }) {
     setEndError(null);
     try {
       const summary = await groupService.endTrip();
-      router.push(`/dashboard/trip-summary?id=${summary.id}`);
+      if (summary?.id && summary.id !== 'completed') {
+        router.push(`/dashboard/trip-summary?id=${summary.id}`);
+      } else {
+        router.push('/dashboard/history');
+      }
     } catch (err) {
-      setEndError(friendlyErrorMessage(err));
+      console.warn('Failed to end trip gracefully:', err);
+      router.push('/dashboard/history');
+    } finally {
       setEnding(false);
     }
   };

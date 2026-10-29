@@ -11,23 +11,25 @@ const SEVERITY_STYLE: Record<AlertItem['severity'], { icon: React.ElementType; c
 };
 
 export default function AlertPanel({ alerts }: { alerts: AlertItem[] }) {
+  const safeAlerts = Array.isArray(alerts) ? alerts : [];
+
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-foreground">Alerts</h2>
-        {alerts.length > 0 && (
-          <span className="text-[11px] font-semibold text-muted-foreground">{alerts.length} active</span>
+        {safeAlerts.length > 0 && (
+          <span className="text-[11px] font-semibold text-muted-foreground">{safeAlerts.length} active</span>
         )}
       </div>
 
-      {alerts.length === 0 ? (
+      {safeAlerts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
           <BellOff className="w-6 h-6 text-muted-foreground" />
           <p className="text-xs text-muted-foreground">No alerts. Everyone&apos;s on track.</p>
         </div>
       ) : (
         <div className="space-y-2.5">
-          {alerts.map((alert) => {
+          {safeAlerts.map((alert) => {
             const style = SEVERITY_STYLE[alert.severity];
             const Icon = style.icon;
             return (

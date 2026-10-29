@@ -22,6 +22,11 @@ class ProfileOut(BaseModel):
     avatar_url: Optional[str] = None
 
 
+class ProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
 class MeResponse(BaseModel):
     id: str
     email: Optional[str] = None

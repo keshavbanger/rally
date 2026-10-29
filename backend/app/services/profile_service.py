@@ -36,6 +36,8 @@ def get_or_create_profile(
     """
     profile = get_profile(db, user_id)
     if profile is not None:
+        # Hints are only used at creation time — never overwrite an existing
+        # profile's fields on a subsequent call (see docstring).
         return profile
 
     profile = Profile(id=uuid.UUID(str(user_id)), full_name=full_name_hint, avatar_url=avatar_url_hint)

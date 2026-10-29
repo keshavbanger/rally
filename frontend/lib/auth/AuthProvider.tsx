@@ -2,7 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
+
+/** Discriminated outcome for signUpWithPassword so the UI can react
+ * precisely to each scenario without guessing. */
+export type SignUpOutcome =
+  | { status: 'confirm_email' }           // New user; Supabase sent a confirmation email
+  | { status: 'session_ready' }           // Email-confirm OFF; user is already signed in
+  | { status: 'duplicate'; error: string }// Already registered (Supabase error path)
+  | { status: 'error'; error: string };   // Any other error (network, weak password, etc.)
 
 interface AuthContextValue {
   session: Session | null;
@@ -13,7 +21,7 @@ interface AuthContextValue {
   loading: boolean;
   accessToken: string | null;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUpWithPassword: (email: string, password: string, fullName?: string) => Promise<{ error: string | null }>;
+  signUpWithPassword: (email: string, password: string, fullName?: string) => Promise<SignUpOutcome>;
   signOut: () => Promise<void>;
 }
 
@@ -24,7 +32,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const supabase = getSupabaseClient();
     let active = true;
 
     supabase.auth.getSession().then(({ data }) => {
@@ -50,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
-    const { data, error } = await getSupabaseClient().auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     // Update context state directly from the response rather than waiting
     // on onAuthStateChange above — supabase-js dispatches that listener via
     // a deferred setTimeout(0), so a caller that awaits this and then
@@ -62,21 +69,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error?.message ?? null };
   }, []);
 
-  const signUpWithPassword = useCallback(async (email: string, password: string, fullName?: string) => {
-    const { data, error } = await getSupabaseClient().auth.signUp({
+  const signUpWithPassword = useCallback(async (email: string, password: string, fullName?: string): Promise<SignUpOutcome> => {
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: fullName ? { data: { full_name: fullName } } : undefined,
     });
-    // Same race as signInWithPassword above. `data.session` is null when
-    // Supabase's email-confirmation flow is on (expected, not a bug) —
-    // setting it to null here is a no-op against the already-null state.
-    if (!error) setSession(data.session);
-    return { error: error?.message ?? null };
+
+    if (error) {
+      // Supabase GoTrue returns specific codes for duplicate emails when
+      // email-confirm is OFF. Normalise to a 'duplicate' outcome so the UI
+      // can show a targeted message instead of leaking the raw error string.
+      const msg = error.message ?? '';
+      const isDuplicate =
+        error.status === 422 ||
+        msg.toLowerCase().includes('already registered') ||
+        msg.toLowerCase().includes('already been registered') ||
+        msg.toLowerCase().includes('user already exists');
+      return isDuplicate
+        ? { status: 'duplicate', error: msg }
+        : { status: 'error', error: msg };
+    }
+
+    // When email-confirm is ON and the address is already registered, GoTrue
+    // returns HTTP 200 with a synthetic user whose `identities` array is empty
+    // (no real identity was created). Treat this the same as a new user waiting
+    // for confirmation — don't leak that the address exists.
+    const identities = data.user?.identities ?? [];
+    if (data.session) {
+      // Email-confirm is OFF; user is immediately signed in.
+      setSession(data.session);
+      return { status: 'session_ready' };
+    }
+    // Either a genuine new user or an existing user with email-confirm on.
+    // Both cases: tell the user to check their inbox.
+    if (identities.length === 0 && !data.session) {
+      // Existing user with email-confirm on — GoTrue sent a "sign in" link,
+      // not a confirmation link. Safe to show the same "check your email"
+      // message (does not confirm or deny the address was already registered).
+    }
+    return { status: 'confirm_email' };
   }, []);
 
   const signOut = useCallback(async () => {
-    await getSupabaseClient().auth.signOut();
+    await supabase.auth.signOut();
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -105,6 +141,6 @@ export function useAuth(): AuthContextValue {
  * render can call for the CURRENT token on demand, without re-rendering
  * every time it changes. */
 export async function getCurrentAccessToken(): Promise<string | null> {
-  const { data } = await getSupabaseClient().auth.getSession();
+  const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }

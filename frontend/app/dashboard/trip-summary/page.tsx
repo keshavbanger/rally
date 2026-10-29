@@ -2,17 +2,98 @@
 
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Route, Clock, Users, BellRing, Navigation2, UsersRound, Octagon, Siren, CheckCircle2 } from 'lucide-react';
+import { useEffect, useState, Suspense } from 'react';
+import { Route, Clock, Users, BellRing, Navigation2, UsersRound, Octagon, Siren, CheckCircle2, Loader2 } from 'lucide-react';
 import RiskRing from '@/components/dashboard/RiskRing';
 import RouteReplayMap from '@/components/map/RouteReplayMap';
 import { getLatestTripSummary, getTripSummaryById } from '@/lib/mock/tripHistoryService';
-
-import { Suspense } from 'react';
+import * as tripsApi from '@/lib/api/trips';
+import * as analyticsApi from '@/lib/api/analytics';
+import * as routesApi from '@/lib/api/routes';
+import type { TripSummary } from '@/lib/mock/types';
 
 function TripSummaryContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
-  const summary = id ? getTripSummaryById(id) : getLatestTripSummary();
+  const [summary, setSummary] = useState<TripSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSummary() {
+      const local = id ? getTripSummaryById(id) : getLatestTripSummary();
+      if (local) {
+        setSummary(local);
+        setLoading(false);
+        return;
+      }
+      if (id) {
+        try {
+          const [apiTrip, analytics, insights, routeData] = await Promise.all([
+            tripsApi.getTrip(id).catch(() => null),
+            analyticsApi.getTripAnalytics(id).catch(() => null),
+            analyticsApi.getTripInsights(id).catch(() => null),
+            routesApi.getRoute(id).catch(() => null),
+          ]);
+          if (cancelled) return;
+          if (apiTrip) {
+            const started = apiTrip.started_at ? new Date(apiTrip.started_at) : new Date(apiTrip.created_at);
+            const routeWaypoints = routeData?.route?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
+            const remoteSummary: TripSummary = {
+              id: apiTrip.id,
+              groupName: 'Rally Trip',
+              destination: apiTrip.destination_name ?? 'Destination',
+              date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              completedAt: apiTrip.ended_at ? new Date(apiTrip.ended_at).getTime() : Date.now(),
+              distanceKm: analytics?.distance_traveled_meters != null
+                ? Number((analytics.distance_traveled_meters / 1000).toFixed(1))
+                : (apiTrip.distance ? Number((apiTrip.distance / 1000).toFixed(1)) : 0),
+              durationMin: analytics?.duration_seconds != null
+                ? Math.round(analytics.duration_seconds / 60)
+                : (apiTrip.duration ? Math.round(apiTrip.duration / 60) : 0),
+              membersCount: analytics?.member_count ?? 1,
+              alertsCount: analytics?.alerts_count ?? 0,
+              routeDeviations: analytics?.route_deviations ?? 0,
+              separationEvents: null,
+              unexpectedStops: null,
+              sosCount: analytics?.sos_count ?? 0,
+              safetyScore: apiTrip.safety_score ?? 100,
+              riskLevel: 'LOW RISK',
+              route: routeWaypoints,
+              destinationLat: routeData?.route?.destination_latitude ?? 0,
+              destinationLng: routeData?.route?.destination_longitude ?? 0,
+              alertPoints: [],
+              deviationPoint: null,
+              keyEvents: [],
+              insights: insights?.highlights ?? [],
+            };
+            setSummary(remoteSummary);
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.warn('Could not fetch trip summary from backend:', err);
+        }
+      }
+      if (!cancelled) {
+        setSummary(null);
+        setLoading(false);
+      }
+    }
+    loadSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Loader2 className="w-6 h-6 animate-spin" />
+        <p className="text-sm">Loading trip summary…</p>
+      </div>
+    );
+  }
 
   if (!summary) {
     return (
@@ -26,15 +107,19 @@ function TripSummaryContent() {
     );
   }
 
+  const durationValue = summary.durationMin != null
+    ? `${Math.floor(summary.durationMin / 60)}h ${summary.durationMin % 60}m`
+    : 'N/A';
+
   const stats = [
-    { label: 'Distance', value: `${summary.distanceKm} km`, icon: Route },
-    { label: 'Duration', value: `${Math.floor(summary.durationMin / 60)}h ${summary.durationMin % 60}m`, icon: Clock },
+    { label: 'Distance', value: summary.distanceKm != null ? `${summary.distanceKm} km` : 'N/A', icon: Route },
+    { label: 'Duration', value: durationValue, icon: Clock },
     { label: 'Members', value: `${summary.membersCount}`, icon: Users },
-    { label: 'Alerts', value: `${summary.alertsCount}`, icon: BellRing },
-    { label: 'Route deviations', value: `${summary.routeDeviations}`, icon: Navigation2 },
-    { label: 'Separation events', value: `${summary.separationEvents}`, icon: UsersRound },
-    { label: 'Unexpected stops', value: `${summary.unexpectedStops}`, icon: Octagon },
-    { label: 'SOS', value: `${summary.sosCount}`, icon: Siren },
+    { label: 'Alerts', value: summary.alertsCount != null ? `${summary.alertsCount}` : 'N/A', icon: BellRing },
+    { label: 'Route deviations', value: summary.routeDeviations != null ? `${summary.routeDeviations}` : 'N/A', icon: Navigation2 },
+    { label: 'Separation events', value: summary.separationEvents != null ? `${summary.separationEvents}` : 'N/A', icon: UsersRound },
+    { label: 'Unexpected stops', value: summary.unexpectedStops != null ? `${summary.unexpectedStops}` : 'N/A', icon: Octagon },
+    { label: 'SOS', value: summary.sosCount != null ? `${summary.sosCount}` : 'N/A', icon: Siren },
   ];
 
   return (
@@ -61,7 +146,7 @@ function TripSummaryContent() {
 
         <div className="rounded-2xl border border-border bg-card p-6 flex flex-col items-center text-center">
           <p className="text-[11px] font-semibold text-muted-foreground tracking-wider mb-4">SAFETY SCORE</p>
-          <RiskRing risk={{ score: summary.safetyScore, level: summary.riskLevel }} size={128} />
+          <RiskRing risk={{ score: summary.safetyScore ?? 0, level: summary.riskLevel ?? 'LOW RISK' }} size={128} />
           <p
             className="text-sm font-bold tracking-wide mt-4"
             style={{
@@ -69,7 +154,7 @@ function TripSummaryContent() {
                 summary.riskLevel === 'LOW RISK' ? '#34D399' : summary.riskLevel === 'MODERATE RISK' ? '#FBBF24' : '#F87171',
             }}
           >
-            {summary.riskLevel}
+            {summary.riskLevel ?? '—'}
           </p>
         </div>
 

@@ -7,3 +7,7 @@ import type { MeResponse } from './types';
 export function getMe(): Promise<MeResponse> {
   return api.get<MeResponse>('/auth/me');
 }
+
+export function updateMe(input: { full_name?: string; avatar_url?: string }): Promise<MeResponse> {
+  return api.patch<MeResponse>('/auth/me', input);
+}

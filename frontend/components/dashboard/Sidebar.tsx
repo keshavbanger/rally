@@ -1,26 +1,30 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
+  Home,
   LayoutDashboard,
   Navigation,
   Users,
   BellRing,
   Map,
   History,
+  User,
   Settings,
   LogOut,
   ChevronDown,
 } from 'lucide-react';
 import { useGroup } from '@/lib/group/useGroup';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth/AuthProvider';
+
 
 const SECTIONS = [
   {
     label: 'MAIN',
     items: [
+      { label: 'Home', href: '/', icon: Home },
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     ],
   },
@@ -40,8 +44,9 @@ const SECTIONS = [
     ],
   },
   {
-    label: 'SYSTEM',
+    label: 'ACCOUNT',
     items: [
+      { label: 'Profile', href: '/dashboard/settings', icon: User },
       { label: 'Settings', href: '/dashboard/settings', icon: Settings },
     ],
   },
@@ -51,26 +56,19 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { group } = useGroup();
+  const { user, signOut } = useAuth();
   const me = group?.members.find((m) => m.isCurrentUser);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [actualName, setActualName] = useState('User');
-  const [actualEmail, setActualEmail] = useState('');
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setActualEmail(user.email || '');
-        setActualName(user.user_metadata?.full_name || user.user_metadata?.name || 'User');
-      }
-    });
-  }, []);
+  const actualName = me?.name || user?.user_metadata?.full_name || user?.user_metadata?.name || 'User';
+  const actualEmail = user?.email || '';
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
     router.push('/login');
   };
 
-  const displayName = me?.name || actualName;
+  const displayName = actualName;
 
   return (
     <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 border-r border-border bg-card">
@@ -92,20 +90,14 @@ export default function Sidebar() {
               {section.items.map((item) => {
                 const active = pathname === item.href;
                 const Icon = item.icon;
-                // Disable Live/Trip items when no group exists
-                const needsGroup = item.href !== '/dashboard' && item.href !== '/dashboard/settings';
-                const disabled = needsGroup && !group;
 
                 return (
                   <Link
-                    key={item.href}
-                    href={disabled ? '#' : item.href}
-                    onClick={(e) => disabled && e.preventDefault()}
+                    key={`${section.label}-${item.label}-${item.href}`}
+                    href={item.href}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       active
                         ? 'bg-rally-blue/10 text-rally-blue border border-rally-blue/30'
-                        : disabled
-                        ? 'text-muted-foreground/40 cursor-not-allowed border border-transparent'
                         : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent'
                     }`}
                   >

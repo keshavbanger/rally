@@ -8,7 +8,8 @@ import { Chrome, Github, ArrowRight } from 'lucide-react';
 import AuthHero from '@/components/auth/AuthHero';
 import SocialButton from '@/components/auth/SocialButton';
 import AuthInput from '@/components/auth/AuthInput';
-import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth/AuthProvider';
+import { supabase } from '@/lib/supabase/client';
 
 const STEPS = [
   { number: 1, text: 'Sign in to your account' },
@@ -18,6 +19,7 @@ const STEPS = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const { signInWithPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,13 +41,10 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error: signInError } = await signInWithPassword(email, password);
     
-    if (error) {
-      setError(error.message);
+    if (signInError) {
+      setError(signInError);
       setLoading(false);
     } else {
       router.push('/dashboard');

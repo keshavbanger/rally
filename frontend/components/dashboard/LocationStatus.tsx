@@ -2,15 +2,19 @@
 
 import { useLocation, getLocationQuality } from '@/hooks/useLocation';
 import { Play, Square, MapPin } from 'lucide-react';
-import { groupService } from '@/lib/mock/groupService';
-import { useEffect } from 'react';
+import { groupService } from '@/lib/group/groupService';
+import { useEffect, useRef } from 'react';
 
 export default function LocationStatus() {
   const { location, isTracking, error, permissionState, startTracking, stopTracking } = useLocation();
+  const lastPosRef = useRef<string>('');
 
   // Wire GPS to backend group service
   useEffect(() => {
     if (location && isTracking) {
+      const posKey = `${location.latitude}:${location.longitude}:${location.speed}:${location.heading}`;
+      if (lastPosRef.current === posKey) return;
+      lastPosRef.current = posKey;
       groupService.updateMyPosition(
         location.latitude,
         location.longitude,

@@ -68,3 +68,4 @@ def get_current_profile(
         full_name_hint=user.full_name_hint,
         avatar_url_hint=user.avatar_url_hint,
     )
+
