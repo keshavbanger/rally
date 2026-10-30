@@ -1,9 +1,10 @@
 # RALLY Backend
 
-FastAPI backend for RALLY. Supabase Postgres + PostGIS is the only database;
-Supabase Auth is the only identity provider. FastAPI never stores passwords
-and never issues its own tokens — it only verifies tokens Supabase already
-issued.
+FastAPI backend for RALLY. Supabase Postgres + PostGIS is the primary database;
+Supabase Auth is the identity provider. FastAPI never stores passwords
+and never issues its own tokens — it cryptographically verifies tokens issued by Supabase Auth.
+
+---
 
 ## Authentication
 
@@ -14,178 +15,97 @@ Next.js  --(Authorization: Bearer <token>)-->  FastAPI
 FastAPI  --(verify signature, expiry, audience, issuer)-->  Authenticated user
 ```
 
-1. The frontend signs the user in via `supabase-js` (`supabase.auth.signInWithPassword`,
-   OAuth, etc.). FastAPI is never involved in this step.
-2. Supabase returns a JWT access token to the frontend
-   (`data.session.access_token`).
-3. The frontend sends it on every request to FastAPI:
-
+1. The frontend authenticates via `supabase-js` (`signInWithPassword`, OAuth, etc.).
+2. Supabase returns a JWT access token to the frontend.
+3. The frontend attaches the token on every request:
    ```
    Authorization: Bearer <SUPABASE_ACCESS_TOKEN>
    ```
+4. FastAPI validates the token in `app/core/security.py` checking signature, expiration, audience (`authenticated`), and issuer.
+5. `get_current_user()` returns `{id, email}`. `get_current_profile()` resolves the matching row in `profiles`.
 
-4. FastAPI verifies the token in `app/core/security.py` — checks the
-   signature against `JWT_SECRET`, expiry, the `authenticated` audience, and
-   (when `SUPABASE_URL` is set) the issuer. It never trusts a user id
-   supplied any other way.
-5. `get_current_user()` (in `app/dependencies/auth.py`) returns the
-   verified `{id, email}`. `get_current_profile()` builds on top of it to
-   fetch (or create, on first login) the matching row in `profiles`.
+---
 
-### `GET /api/v1/auth/me`
+## REST API Overview
 
-Requires `Authorization: Bearer <token>`.
+### 1. Settings & Preferences (`/api/v1/settings`)
+Authenticated user settings persisted in PostgreSQL (`user_settings` table, migration `0008`):
+* `GET /api/v1/settings`: Fetch current user's preferences and threshold configuration.
+* `PATCH /api/v1/settings`: Update alert sensitivity (`LOW`, `MEDIUM`, `HIGH`), separation distance threshold, route deviation threshold, notification category toggles, and audio alerts.
 
-| Case | Response |
-|---|---|
-| No header | `401` |
-| Malformed header / wrong scheme | `401` |
-| Invalid or unsigned-by-us token | `401` |
-| Expired token | `401` |
-| Valid token | `200` |
+### 2. Emergency SOS (`/api/v1/trips/{trip_id}/sos` & `/api/v1/sos`)
+* `POST /api/v1/trips/{trip_id}/sos`: Trigger emergency SOS with device GPS coordinates and note.
+* `GET /api/v1/trips/{trip_id}/sos/history`: List emergency incident history for a trip.
+* `GET /api/v1/groups/{group_id}/sos/active`: Query active unresolved SOS events for the group.
+* `POST /api/v1/sos/{sos_id}/acknowledge`: Group member acknowledges seeing the emergency.
+* `POST /api/v1/sos/{sos_id}/resolve`: Resolves the emergency incident.
+* `POST /api/v1/sos/{sos_id}/cancel`: Only the creator of the SOS can cancel their active request.
 
-```json
-{
-  "id": "b2b1...",
-  "email": "user@example.com",
-  "profile": { "full_name": "Ada Lovelace", "avatar_url": null }
-}
-```
+### 3. Groups & Leadership Transfer (`/api/v1/groups`)
+* `POST /api/v1/groups`: Create a new group (creator becomes `LEADER`).
+* `GET /api/v1/groups/{group_id}`: Fetch group details and active members.
+* `POST /api/v1/groups/{group_id}/transfer-leadership`: Leader transfers authority to another active member.
+* `POST /api/v1/groups/{group_id}/leave`: Member leaves group (requires leadership transfer if leader).
 
-If this is the user's first authenticated request, a `profiles` row is
-created automatically, seeded from `user_metadata.full_name` /
-`user_metadata.avatar_url` when Supabase provided them (never guaranteed —
-falls back to `null`).
+### 4. Trips & History (`/api/v1/trips`)
+* `POST /api/v1/groups/{group_id}/trips`: Create a trip (`CREATED`).
+* `POST /api/v1/trips/{trip_id}/start`: Start a trip (`CREATED -> ACTIVE`).
+* `POST /api/v1/trips/{trip_id}/end`: Conclude a trip (`ACTIVE -> COMPLETED`).
+* `POST /api/v1/trips/{trip_id}/cancel`: Cancel a pending trip (`CREATED -> CANCELLED`).
+* `GET /api/v1/trips/history`: List completed trips strictly scoped to the authenticated user.
 
-## Trips
+### 5. GPS Locations (`/api/v1/trips/{trip_id}/locations`)
+* `POST /api/v1/trips/{trip_id}/locations`: Record breadcrumb point while trip is `ACTIVE`. Coordinates stored as latitude/longitude floats and PostGIS `GEOGRAPHY(POINT, 4326)`.
+* `GET /api/v1/trips/{trip_id}/locations`: Chronological GPS history supporting pagination via `cursor` and `limit`.
 
-A trip belongs to a group and moves through a small state machine:
+### 6. Analytics & Group Health Telemetry
+* `GET /api/v1/trips/{trip_id}/analytics/dashboard`: Returns real-time metrics:
+  * Overall group health score (0–100)
+  * Togetherness percentage
+  * On-route compliance percentage
+  * Member connectivity percentage
+  * Movement stability percentage
+  * Active alert counts & composite risk tier (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`)
 
-```
-CREATED -> ACTIVE -> COMPLETED
-CREATED -> CANCELLED
-```
+---
 
-`COMPLETED` and `CANCELLED` are terminal — every other transition (starting
-a trip twice, cancelling an active trip, etc.) is rejected with `409
-INVALID_TRIP_STATE`. A group can have at most one `ACTIVE` trip at a time;
-this is enforced both as an app-level pre-check (a friendly `409
-ACTIVE_TRIP_EXISTS` on the common path) and, more importantly, as a
-**partial unique index** in Postgres (`uq_trips_one_active_per_group`,
-`UNIQUE(group_id) WHERE status = 'ACTIVE'`, added in migration `0002`) —
-that's what actually stops two concurrent "start trip" requests from both
-succeeding.
+## WebSockets
 
-| Endpoint | Who | Effect |
-|---|---|---|
-| `POST /api/v1/groups/{group_id}/trips` | active group member | creates a trip in `CREATED` |
-| `GET /api/v1/groups/{group_id}/trips` | active group member | lists the group's trips, newest first |
-| `GET /api/v1/trips/{trip_id}` | active member of the trip's group | trip detail |
-| `POST /api/v1/trips/{trip_id}/start` | active member of the trip's group | `CREATED -> ACTIVE` |
-| `POST /api/v1/trips/{trip_id}/end` | active member of the trip's group | `ACTIVE -> COMPLETED` |
-| `POST /api/v1/trips/{trip_id}/cancel` | the trip's creator, or the group leader | `CREATED -> CANCELLED` |
+Real-time bi-directional streaming for live tracking and alerts:
+* **Endpoint**: `/ws/groups/{group_id}?token=<SUPABASE_JWT>`
+* **Authentication**: Token validated on handshake connection.
+* **Message Types**:
+  * Client -> Server: `location_update` (latitude, longitude, speed, heading), `ping`
+  * Server -> Client: `location_update`, `alert`, `sos`, `connection_status`, `pong`
 
-`started_by` always comes from the verified JWT — never from the request
-body. A trip that doesn't exist and a trip whose group the caller isn't an
-active member of both return the same `404 TRIP_NOT_FOUND`, so a client
-can't distinguish "wrong id" from "not your trip."
+---
 
-Trips are never deleted by these endpoints — completed and cancelled trips
-stay as history (see `trips.group_id`'s `ON DELETE RESTRICT` in
-`app/models/trip.py`, which also stops a group from being deleted while
-trip history still references it).
+## Intelligence Engine
 
-## GPS locations
+The backend runs an asynchronous background worker (`app/intelligence/worker.py`) that monitors active trips:
+* **Separation Detector**: Detects when a member exceeds the leader's configured separation threshold.
+* **Route Deviation Detector**: Calculates cross-track distance using Haversine formulas against route polylines.
+* **Stop Detection**: Flags unexpected stationary intervals along the route.
+* **Dynamic Sensitivity**: Leader's `alert_sensitivity` adjusts distance thresholds and time-to-alert intervals dynamically.
 
-Permanent historical GPS storage — no Redis/WebSocket real-time layer yet
-(that's Phase 6). Every point belongs to a trip and is only ever accepted
-while that trip is `ACTIVE`.
+---
 
-| Endpoint | Who | Effect |
-|---|---|---|
-| `POST /api/v1/trips/{trip_id}/locations` | active member of the trip's group, trip must be `ACTIVE` | stores one GPS reading |
-| `GET /api/v1/trips/{trip_id}/locations` | active member of the trip's group (any trip status) | chronological GPS history |
-
-**Fields** — `latitude`/`longitude` are the only required fields.
-
-| Field | Unit | Notes |
-|---|---|---|
-| `latitude`, `longitude` | decimal degrees | -90..90 / -180..180 |
-| `accuracy` | meters | optional, must be >= 0 |
-| `speed` | meters/second | optional, device-reported — never derived from coordinates in this phase |
-| `heading` | degrees, 0 <= h < 360 | optional; 0=N, 90=E, 180=S, 270=W — never calculated in this phase |
-| `recorded_at` | UTC timestamp | when the *device* captured the point; defaults to server time if omitted |
-| `created_at` | UTC timestamp | when the *backend* stored it — always server-assigned |
-
-`recorded_at` — not `created_at` — is what the history endpoint orders by,
-since mobile networks can deliver points out of order. A `recorded_at` more
-than 5 minutes in the future is rejected as `400 INVALID_TIMESTAMP` (normal
-clock drift is tolerated; a broken device clock is not). Naive timestamps
-are treated as UTC.
-
-**Storage**: coordinates are stored twice — as plain `latitude`/`longitude`
-floats (what the API returns) and as a PostGIS `GEOGRAPHY(POINT, 4326)`
-(`POINT(longitude latitude)` — longitude first) for future geospatial
-queries. The raw PostGIS value is never serialized back to the client.
-
-**Trust boundary**: `LocationCreate` has no `id`/`trip_id`/`group_id`/
-`user_id`/`created_at` fields — `trip_id` comes from the URL, `group_id`
-from `trip.group_id`, `user_id` from the verified JWT. A trip that doesn't
-exist and a trip whose group the caller isn't an active member of both
-return the same `404 TRIP_NOT_FOUND` (same existence-hiding pattern as
-trips/groups).
-
-**History filtering & pagination**: `GET .../locations` accepts `from`,
-`to`, `user_id`, `limit` (default 500, max 5000), and `cursor` (an ISO
-timestamp — returns only points with `recorded_at` strictly after it).
-To page forward, pass the `recorded_at` of the last point you received as
-the next request's `cursor`. Results are always scoped to the one trip in
-the URL, so an unrelated `user_id` just returns an empty list rather than
-leaking another group's data.
-
-**Rate limiting**: not implemented yet (that's Redis, Phase 6+). Mobile
-clients are expected to post every few seconds during an active trip;
-`record_location()` is a single call so a limiter can wrap it later
-without restructuring anything.
-
-## Environment variables
-
-Copy `.env.example` to `.env` and fill in real values — never commit `.env`.
-
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY` — from Settings > API in the Supabase dashboard
-- `SUPABASE_SERVICE_ROLE_KEY` — same page. **Backend-only.** Never sent to the
-  frontend, never returned in any API response, never logged.
-- `DATABASE_URL` — Supabase Postgres connection string. Paste it exactly as
-  Supabase gives it to you (`postgresql://...`) — the engine automatically
-  rewrites that to `postgresql+psycopg://` internally, since this project
-  installs `psycopg` (v3), not the legacy `psycopg2`.
-- `JWT_SECRET` — Settings > API > JWT Settings > JWT Secret. This is what
-  FastAPI uses to verify tokens Supabase issued.
-- `FRONTEND_URL` — comma-separated allowed CORS origins, e.g. `http://localhost:3000`
-- `REDIS_URL` — connection string for Redis live state, e.g. `redis://localhost:6379/0`
-- `OSRM_URL` — reserved for later phases, unused so far
-
-## WebSockets (Phase 6)
-WebSockets provide the real-time communication channel. Current state lives in Redis, while historical location data lives in PostgreSQL.
-- **Endpoint**: `/ws/groups/{group_id}?token=<SUPABASE_JWT>`
-- **Flow**: Client connects -> Authenticates via JWT -> Sends `location_update` -> Backend saves to Redis/Postgres -> Broadcasts to Group.
-- **Message format**: `{"type": "location_update", "data": {...}}`. Also supports `ping` messages.
-
-## Local development
+## Local Development & Testing
 
 ```bash
-cd backend
+# 1. Activate virtual environment
 python -m venv venv
-./venv/Scripts/activate        # Windows; source venv/bin/activate on macOS/Linux
+venv\Scripts\activate            # macOS/Linux: source venv/bin/activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
-cp .env.example .env           # then fill in real Supabase values
-alembic upgrade head           # requires a real DATABASE_URL
-uvicorn app.main:app --reload
-```
 
-Run tests (these use a locally-signed test JWT, not a real Supabase
-project — see `tests/conftest.py`):
+# 3. Run database migrations
+alembic upgrade head
 
-```bash
+# 4. Start API server
+uvicorn app.main:app --reload --port 8000
+
+# 5. Execute test suite
 pytest -v
 ```

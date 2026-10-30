@@ -1,155 +1,184 @@
-# RALLY
+# RALLY — Group Mobility Intelligence & Safety Platform
 
-RALLY is a group mobility & safety platform: create a group, start a trip
-together, and track everyone's location on a shared live map — with alerts
-for falling behind, separation, route deviation, and a one-tap SOS.
+RALLY is an AI-powered real-time group mobility coordination, live tracking, route intelligence, and safety platform. Create a group, embark on trips together, track everyone's live location on a shared tactical map, and receive proactive safety alerts for group separation, route deviation, stop detection, and one-tap emergency SOS.
 
-This repo is a monorepo: a Next.js frontend (currently mock-data-driven)
-and a FastAPI backend (real, backed by Supabase Postgres/PostGIS) that the
-frontend will progressively be wired up to.
+The project is built as a high-performance monorepo: a **Next.js 14** (App Router) frontend, a **FastAPI** backend backed by **PostgreSQL/PostGIS** and **Supabase Auth**, real-time **WebSockets**, and background intelligence detection.
 
-## Structure
+---
+
+## Architecture & Tech Stack
 
 ```
-frontend/          Next.js 14 (App Router) + TypeScript + Tailwind + Framer Motion
-backend/           FastAPI + Supabase Postgres/PostGIS + SQLAlchemy + Alembic
-packages/shared/   Design tokens, distance/speed formatting, Haversine helper
-packages/types/    Shared TypeScript types (User, Group, Trip, Alert, SOS, ...)
-docs/              Technical specifications and database documentation
+frontend/          Next.js 14 (App Router) + TypeScript + Tailwind CSS + Web Audio API
+backend/           FastAPI + PostgreSQL / PostGIS + SQLAlchemy + Alembic + WebSockets
+packages/shared/   Design tokens, distance/speed formatters, Haversine spatial math
+packages/types/    Shared TypeScript contracts (User, Group, Trip, Alert, SOS, Telemetry)
+docs/              Comprehensive architectural and API technical specifications
 ```
 
-`packages/types` currently models the platform's intended full shape
-(risk scoring, recommendations, realtime events) — the backend implements
-this incrementally phase by phase; see `backend/README.md` for what's
-actually built versus still ahead.
+* **Frontend**: Next.js 14, React 18, Leaflet / OpenStreetMap (Esri World Dark Canvas) + Google Maps JavaScript/Places/Routes API, Lucide icons, Tailwind CSS.
+* **Backend**: FastAPI, Pydantic v2, SQLAlchemy 2.0 (async), PostGIS spatial queries, JWT verification via Supabase JWKS.
+* **Real-Time Communication**: Native WebSocket protocol with live heartbeat ping/pong, location broadcasting, and emergency event dispatch.
+* **Safety & Intelligence**: Deterministic rule-based detection engine for member separation, route deviation, and composite group health metrics.
 
-## Documentation
+---
 
-- **[Schema Specification](SCHEMA.md)** — Comprehensive data dictionary, PostGIS spatial types, partial unique indexes, and Redis ephemeral schema (also mirrored at `docs/database.md`).
-- **[Database ERD](docs/DATABASE_ERD.md)** — Entity-relationship diagram and constraint mapping.
-- **[Backend Guide](backend/README.md)** — Authentication flow, REST API endpoints, and WebSocket protocol.
+## Core Capabilities & Features
+
+### 1. One-Tap Emergency SOS
+* **Instant Broadcast**: Emergency button on active trip dashboard captures device GPS coordinates and notes.
+* **Backend Persistence**: Stored via `POST /api/v1/trips/{trip_id}/sos` with active trip and membership validation.
+* **Real-Time Banner**: Displays active emergencies across all group members via WebSockets.
+* **Lifecycle Management**: Initiator-only cancellation (`POST /api/v1/sos/{id}/cancel`), with member acknowledgment and resolution endpoints.
+
+### 2. Genuine Trip History
+* **Zero Mock Leakage**: Authenticated users only see genuine trips they participated in (`GET /api/v1/trips/history`).
+* **Complete Metadata**: Real departure and arrival times, origins, destinations, distances, durations, and safety scores.
+* **Resilient UI**: Skeleton loading states, informative empty states, and explicit error retry handling.
+
+### 3. GPS Breadcrumb Route Replay
+* **Chronological Playback**: Replays recorded GPS traces (`GET /api/v1/trips/{id}/locations`) with an animated marker.
+* **Interactive Scrubber**: Timeline slider with Play, Pause, Resume, Reset, and speed modifiers (1x, 2x, 5x).
+* **Planned vs. Actual Paths**: Clear visual distinction between planned route lines (cyan) and actual GPS tracks (emerald).
+* **Live HUD**: Displays vehicle speed in km/h and exact sample timestamps throughout playback.
+
+### 4. Persistent User Settings & Safety Thresholds
+* **Database Backed**: Saved in `user_settings` table via authenticated `GET /api/v1/settings` and `PATCH /api/v1/settings`.
+* **Intelligence Integration**: Configured alert sensitivity (`LOW`, `MEDIUM`, `HIGH`), separation distance, and route deviation thresholds dynamically adjust the backend detection algorithms.
+* **Notification Preferences**: Category toggles (Alerts, SOS, Connectivity, Summaries) filter server-side dispatch.
+
+### 5. Group Health & Risk Telemetry
+* **Deterministic Composite Scoring**: Real-time group health index (0–100) combining togetherness, on-route compliance, connectivity, and movement stability.
+* **Data Sufficiency Handling**: Explicitly reports `INSUFFICIENT_DATA` when location updates are sparse rather than fabricating a healthy score.
+* **Live Telemetry Card**: Visual progress bars and status indicators (`OPTIMAL`, `STABLE`, `ATTENTION`, `RISK`).
+
+### 6. Group Leadership Transfer
+* **Eligible Delegation**: Group leaders can transfer leadership to any active group member before leaving.
+* **Transactional Integrity**: Atomic database updates ensure consistency between `groups.leader_id` and `group_members.role`.
+* **Guardrails**: Prevents leaders from abandoning groups without designating a successor.
+
+### 7. Synthesized Web Audio Alerts
+* **Browser-Native Audio**: Zero external audio asset dependencies using Web Audio API synthesis.
+* **Dual Tone Alerting**: Subtle harmonic chime for warnings; high-urgency alternating tone for SOS emergencies.
+* **Deduplication**: Suppresses repeated sounds from duplicate WebSocket frames or React re-renders.
+
+### 8. Hybrid Resilient Mapping System
+* **Primary Google Maps**: Dynamic satellite, street, and vector tiles when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is configured.
+* **Zero-Config Tactical Fallback**: Automatically activates a dark-mode tactical map (Esri Dark Canvas & OpenStreetMap) when no API key is present or if `ApiNotActivatedMapError` occurs, eliminating setup blockers.
+
+---
+
+## Technical Documentation
+
+* **[System Architecture (docs/architecture.md)](docs/architecture.md)** — Architectural layers, WebSocket life-cycle, spatial indexing, and security boundaries.
+* **[API Reference (docs/api.md)](docs/api.md)** — Full REST and WebSocket API specification including payload schemas, error codes, and RBAC rules.
+* **[Intelligence & Safety Engine (docs/intelligence.md)](docs/intelligence.md)** — Detector formulas, mathematical threshold scaling, and group health calculation.
+* **[Database ERD (docs/DATABASE_ERD.md)](docs/DATABASE_ERD.md)** — Entity relationships, foreign keys, and cascade deletion rules.
+
+---
 
 ## Getting Started
 
 ### Prerequisites
-- **Node.js**: v18+ and `npm`
-- **Python**: 3.11+ (with `venv`)
-- **Supabase**: A Supabase project with Postgres + PostGIS enabled
-- **Redis**: Running locally or via Docker (`redis-server` on port 6379)
+* **Node.js**: v18+ and `npm`
+* **Python**: 3.11+ (with `venv`)
+* **Supabase**: Postgres with PostGIS enabled (`CREATE EXTENSION IF NOT EXISTS postgis;`)
+* **Redis** *(Optional)*: Port 6379 for live tracking cache (system degrades gracefully to database polling if omitted)
+
+---
 
 ### 1. Environment Setup
 
-Configure both backend and frontend environment files:
+Configure environment files for backend and frontend:
 
 ```bash
 # Backend credentials
 cp backend/.env.example backend/.env
-# Fill in DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET
 
 # Frontend credentials
 cp frontend/.env.local.example frontend/.env.local
-# Fill in NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
+
+#### Required Variables
+* **`backend/.env`**:
+  * `DATABASE_URL`: Supabase Postgres connection string (`postgresql+psycopg://...`)
+  * `SUPABASE_URL`: Project URL (`https://<project-ref>.supabase.co`)
+  * `SUPABASE_ANON_KEY`: Public client key
+  * `SUPABASE_SERVICE_ROLE_KEY`: Server-only service role key
+  * `JWT_SECRET`: Supabase JWT secret for token verification
+* **`frontend/.env.local`**:
+  * `NEXT_PUBLIC_API_URL`: Backend URL (`http://localhost:8000`)
+  * `NEXT_PUBLIC_WS_URL`: WebSocket URL (`ws://localhost:8000`)
+  * `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL
+  * `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anon key
+  * `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: *(Optional)* Google Maps API key (automatic OpenStreetMap fallback activates if omitted)
 
 ---
 
-### 2. Option A: Quickstart (From Monorepo Root)
+### 2. Running Locally
 
-You can launch both services directly from the repository root:
-
+#### Option A: Quickstart from Root
 ```bash
-# Install root and workspace dependencies
+# Install all dependencies
 npm install
 
-# Terminal 1: Start FastAPI backend (port 8000)
+# Start FastAPI backend (port 8000)
 npm run dev:backend
 
-# Terminal 2: Start Next.js frontend (port 3000)
+# Start Next.js frontend (port 3000)
 npm run dev:web
 ```
 
----
+#### Option B: Manual Setup
 
-### 3. Option B: Manual Setup (Separate Terminals)
-
-#### Backend (Terminal 1)
-
-> **Important**: Always navigate into the `backend/` directory before running Alembic migrations or Uvicorn!
-
+**Terminal 1 — Backend**:
 ```bash
-# 1. Navigate to backend directory
 cd backend
-
-# 2. Create and activate a Python virtual environment
-python3 -m venv venv
-source venv/bin/activate       # On Windows: venv\Scripts\activate
-
-# 3. Install Python dependencies
+python -m venv venv
+venv\Scripts\activate            # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-
-# 4. Apply database migrations
-alembic upgrade head
-
-# 5. Start development API server
+alembic upgrade head             # Run database migrations
 uvicorn app.main:app --reload --port 8000
 ```
+* API Base: [http://localhost:8000](http://localhost:8000)
+* Interactive Swagger Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+* Health Endpoint: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
-- API Base: [http://localhost:8000](http://localhost:8000)
-- Interactive API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Health Check: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
-
-#### Frontend (Terminal 2)
-
+**Terminal 2 — Frontend**:
 ```bash
-# 1. Navigate to frontend directory
 cd frontend
-
-# 2. Install dependencies
 npm install
-
-# 3. Start Next.js dev server
 npm run dev
 ```
-
-- Web App: [http://localhost:3000](http://localhost:3000)
-
----
-
-### 4. Running Migrations & Tests
-
-- **Run Alembic Migrations**:
-  - From `backend/`: `alembic upgrade head`
-  - From repository root: `alembic -c backend/alembic.ini upgrade head`
-- **Run Backend Tests**:
-  - From repository root: `npm run test:api`
-  - From `backend/`: `pytest tests/`
+* Web Dashboard: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-### 5. Troubleshooting & Common Gotchas
+### 3. Running Automated Tests
 
-- **`FAILED: No 'script_location' key found in configuration.`**
-  - This happens when running `alembic` from the repository root where no `alembic.ini` resides.
-  - **Solution**: Either `cd backend` first, or specify the config path: `alembic -c backend/alembic.ini upgrade head`.
+#### Backend Test Suite (Pytest)
+```bash
+cd backend
+pytest -v
+```
+Includes comprehensive test coverage for:
+* One-Tap SOS creation, acknowledgement, resolution, and authorization (`test_sos_api.py`)
+* Trips lifecycle, route activation, and genuine user history (`test_trips_api.py`)
+* GPS breadcrumb replay and movement state (`test_replay.py`)
+* Settings persistence, validation, dynamic thresholds, and telemetry (`test_settings_and_telemetry.py`)
 
-- **`ERROR: [Errno 48] Address already in use` (Port 8000 or 3000)**
-  - Another process is already running on that port.
-  - **Solution**: Find and stop the process:
-    ```bash
-    # Find process ID
-    lsof -i :8000
-    # Stop process
-    kill -9 <PID>
-    ```
+#### Frontend Validation
+```bash
+cd frontend
+npx tsc --noEmit                 # TypeScript static verification
+npm run build                    # Production bundle verification
+```
 
-- **`ModuleNotFoundError: No module named 'app'`**
-  - Uvicorn was run outside the `backend/` folder without specifying the app directory.
-  - **Solution**: Run `cd backend` before `uvicorn app.main:app --reload`, or use `uvicorn --app-dir backend app.main:app --reload --port 8000`.
+---
 
-## Security notes
+## Security Guarantees
 
-- `SUPABASE_SERVICE_ROLE_KEY` exists only in backend environment variables —
-  never in frontend code, never returned in an API response.
-- The backend never trusts a user id from a request body/query string —
-  every identity comes from a verified Supabase JWT.
-- Never commit `.env`.
+* **Zero Identity Spoofing**: User identity is derived strictly from verified Supabase JWT signatures on every request. Client-supplied `user_id` values in request bodies or query strings are ignored.
+* **Secret Protection**: `SUPABASE_SERVICE_ROLE_KEY` and database credentials are strictly isolated to backend environment variables.
+* **Group Scoping & Authorization**: Access to trips, active alerts, locations, and member telemetry strictly verifies active group membership in PostgreSQL.
+* **Defensive Schema**: Sensitive history records (`sos_events`, `trip_analytics_snapshots`, `location_history`) are protected from unintended cascading deletes.
