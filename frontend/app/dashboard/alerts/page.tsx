@@ -81,7 +81,7 @@ function AlertsContent({ group }: { group: Group }) {
           {unreadCount > 0 && (
             <button
               onClick={handleMarkAllRead}
-              className="px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-foreground text-sm font-semibold hover:bg-white/10 transition-colors shrink-0"
+              className="px-4 py-2.5 rounded-lg bg-muted/60 border border-border text-foreground text-sm font-semibold hover:bg-muted transition-colors shrink-0"
             >
               Mark all as read
             </button>
@@ -113,7 +113,7 @@ function AlertsContent({ group }: { group: Group }) {
               className={`px-4 py-2 rounded-full text-sm font-semibold capitalize shrink-0 transition-colors ${
                 filter === f
                   ? 'bg-rally-blue text-white'
-                  : 'bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
               }`}
             >
               {f}
@@ -161,13 +161,13 @@ function AlertsContent({ group }: { group: Group }) {
                           <p className={`text-xs font-bold ${config.colorClass} tracking-wide`}>
                             {config.label} {alert.status === 'resolved' && '· ✓ RESOLVED'}
                           </p>
-                          <h3 className={`text-base font-semibold mt-1 ${isUnread ? 'text-white' : 'text-foreground'}`}>
+                          <h3 className={`text-base font-semibold mt-1 text-foreground ${isUnread ? 'font-bold' : ''}`}>
                             {alert.message}
                           </h3>
                         </div>
                         <button
                           onClick={() => setSelectedAlert(alert)}
-                          className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold hover:bg-white/10 transition-colors shrink-0"
+                          className="px-3 py-1.5 rounded-lg bg-muted/60 border border-border text-xs font-semibold hover:bg-muted transition-colors shrink-0"
                         >
                           View
                         </button>
@@ -202,7 +202,7 @@ function AlertsContent({ group }: { group: Group }) {
               <h3 className="text-lg font-bold text-foreground">Alert Details</h3>
               <button
                 onClick={() => setSelectedAlert(null)}
-                className="p-2 -mr-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                className="p-2 -mr-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -260,7 +260,7 @@ function AlertsContent({ group }: { group: Group }) {
               {!selectedAlert.isRead && (
                 <button
                   onClick={() => handleMarkAsRead(selectedAlert.id)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm font-bold hover:bg-white/10 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-muted/60 border border-border text-foreground text-sm font-bold hover:bg-muted transition-colors"
                 >
                   <Check className="w-4 h-4" /> Mark as Read
                 </button>

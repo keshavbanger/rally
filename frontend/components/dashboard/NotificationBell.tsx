@@ -75,7 +75,7 @@ export default function NotificationBell({ unreadCount }: { unreadCount: number 
       <button
         onClick={handleToggle}
         aria-label="Notifications"
-        className="relative w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+        className="relative w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
@@ -114,7 +114,7 @@ export default function NotificationBell({ unreadCount }: { unreadCount: number 
                 <button
                   key={n.id}
                   onClick={() => !n.read_at && handleMarkRead(n.id)}
-                  className={`w-full text-left px-4 py-3 border-b border-border last:border-b-0 hover:bg-white/5 transition-colors ${
+                  className={`w-full text-left px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted transition-colors ${
                     !n.read_at ? 'bg-rally-blue/5' : ''
                   }`}
                 >

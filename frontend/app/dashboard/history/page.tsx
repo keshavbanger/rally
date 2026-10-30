@@ -228,7 +228,7 @@ export default function TripHistoryPage() {
         {/* List */}
         {allTrips.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center gap-4 rounded-2xl border border-border bg-card">
-            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-muted-foreground">
+            <div className="w-12 h-12 rounded-2xl bg-muted border border-border flex items-center justify-center text-muted-foreground">
               <Compass className="w-6 h-6" />
             </div>
             <div>
@@ -306,7 +306,7 @@ export default function TripHistoryPage() {
 
                     <Link
                       href={`/dashboard/history/${trip.id}`}
-                      className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold hover:bg-white/10 transition-colors shrink-0"
+                      className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-muted/60 border border-border text-foreground text-xs font-semibold hover:bg-muted transition-colors shrink-0"
                     >
                       View Details
                     </Link>

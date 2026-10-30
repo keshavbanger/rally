@@ -24,7 +24,7 @@ export default function EmptyRallyState() {
         </Link>
         <Link
           href="/join-group"
-          className="px-6 py-2.5 rounded-xl border border-border text-foreground text-sm font-semibold hover:bg-white/5 transition-colors"
+          className="px-6 py-2.5 rounded-xl border border-border text-foreground text-sm font-semibold hover:bg-muted transition-colors"
         >
           Join RALLY
         </Link>

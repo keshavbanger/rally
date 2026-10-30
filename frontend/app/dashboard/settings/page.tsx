@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { X, LogOut, Check, Volume2, ShieldAlert } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import Toggle from '@/components/dashboard/Toggle';
-import { useGroup } from '@/lib/group/useGroup';
+import { useGroup } from '@/hooks/useGroup';
 import { useSettings } from '@/lib/mock/useSettings';
+import { useTheme } from '@/lib/theme/ThemeProvider';
 import { groupService } from '@/lib/group/groupService';
 import { supabase } from '@/lib/supabase';
 import { updateMe } from '@/lib/api/auth';
@@ -17,6 +18,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const { group } = useGroup();
   const { settings, update } = useSettings();
+  const { theme, setTheme } = useTheme();
 
   const [actualName, setActualName] = useState(settings.profile.name);
   const [actualEmail, setActualEmail] = useState(settings.profile.email);
@@ -123,7 +125,7 @@ export default function SettingsPage() {
                   setEditError('');
                   setIsEditModalOpen(true);
                 }}
-                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-foreground hover:bg-white/10 transition-colors shrink-0 w-full sm:w-auto"
+                className="px-4 py-2 rounded-lg bg-muted/60 border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors shrink-0 w-full sm:w-auto"
               >
                 Edit Profile
               </button>
@@ -160,7 +162,7 @@ export default function SettingsPage() {
               </div>
               <button
                 onClick={handleLocationManage}
-                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-foreground hover:bg-white/10 transition-colors shrink-0"
+                className="px-4 py-2 rounded-lg bg-muted/60 border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors shrink-0"
               >
                 Manage
               </button>
@@ -379,19 +381,24 @@ export default function SettingsPage() {
           <h2 className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase">Preferences</h2>
           <div className="rounded-2xl border border-border bg-card divide-y divide-border">
             <div className="p-5 flex items-center justify-between gap-4">
-              <p className="text-sm font-semibold text-foreground">Theme</p>
-              <div className="flex bg-background border border-border rounded-lg p-1">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Theme</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Customize interface appearance</p>
+              </div>
+              <div className="flex bg-muted/60 border border-border rounded-lg p-1" role="group" aria-label="Theme selector">
                 {(['dark', 'light', 'system'] as const).map((t) => (
                   <button
                     key={t}
+                    type="button"
                     onClick={() => {
-                      update({ appearance: { ...settings.appearance, theme: t } });
-                      showToast('Preferences saved');
+                      setTheme(t);
+                      showToast(`Switched to ${t} mode`);
                     }}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors ${
-                      settings.appearance.theme === t
-                        ? 'bg-rally-blue text-white'
-                        : 'text-muted-foreground hover:text-foreground'
+                    aria-pressed={theme === t}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-all ${
+                      theme === t
+                        ? 'bg-rally-blue text-white shadow-sm font-bold'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
                     }`}
                   >
                     {t}
@@ -477,7 +484,7 @@ export default function SettingsPage() {
                   <div className="w-12 h-12 rounded-full bg-rally-blue/15 border border-rally-blue/30 text-rally-blue font-bold flex items-center justify-center text-lg">
                     {editName ? editName.charAt(0).toUpperCase() : 'U'}
                   </div>
-                  <button type="button" disabled className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-muted-foreground cursor-not-allowed">
+                  <button type="button" disabled className="px-3 py-1.5 rounded-lg bg-muted border border-border text-xs font-semibold text-muted-foreground cursor-not-allowed">
                     Upload / Change
                   </button>
                 </div>
@@ -492,7 +499,7 @@ export default function SettingsPage() {
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 disabled={isSaving}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-border text-foreground text-sm font-bold hover:bg-white/5 transition-colors"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-border text-foreground text-sm font-bold hover:bg-muted transition-colors"
               >
                 Cancel
               </button>

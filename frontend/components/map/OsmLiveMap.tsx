@@ -3,9 +3,8 @@
 /**
  * OsmLiveMap – Interactive Leaflet / OpenStreetMap implementation for RALLY.
  *
- * Provides a rich, dark-mode tactical live map when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
- * is not configured, ensuring users always have a fully functional live tracking map
- * with zero required cloud billing or setup.
+ * Supports both Light and Dark themes dynamically using high-contrast Esri
+ * Canvas tiles (World Light Gray and World Dark Gray).
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,14 +16,13 @@ import {
   Maximize,
   Route as RouteIcon,
   MapPin,
-  Info,
   X,
-  Compass,
 } from 'lucide-react';
 import type { AlertItem, Group } from '@/lib/mock/types';
 import { STATUS_STYLE } from '@/components/dashboard/status';
 import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
-import type { ConnectionStatus, ServerMessage } from '@/lib/ws/types';
+import type { ServerMessage } from '@/lib/ws/types';
+import { useTheme } from '@/lib/theme/ThemeProvider';
 
 import 'leaflet/dist/leaflet.css';
 
@@ -60,6 +58,7 @@ export default function OsmLiveMap({
   deviceLoc: propDeviceLoc,
 }: OsmLiveMapProps) {
   const router = useRouter();
+  const { resolvedTheme } = useTheme();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const [L, setL] = useState<any>(null);
@@ -67,8 +66,11 @@ export default function OsmLiveMap({
   const [showInfoBanner, setShowInfoBanner] = useState(true);
 
   // Markers and layers refs for clean Leaflet lifecycle updates
+  const tilesLayerRef = useRef<any>(null);
   const markersLayerRef = useRef<any>(null);
   const polylinesLayerRef = useRef<any>(null);
+
+  const isLight = resolvedTheme === 'light';
 
   // ── Device location fallback ──────────────────────────────────────────────
   const [internalDeviceLoc, setInternalDeviceLoc] = useState<{ lat: number; lng: number } | null>(null);
@@ -207,7 +209,6 @@ export default function OsmLiveMap({
       ];
     }
     if (hasDestination) return [destLat, destLng];
-    // Default to Northern India (Solang Valley / Manali scenic mountain region)
     return [32.3166, 77.1578];
   }, [deviceLoc, effectiveMembers, hasDestination, destLat, destLng]);
 
@@ -233,23 +234,7 @@ export default function OsmLiveMap({
       attributionControl: false,
     });
 
-    // Free dark-mode tactical base map tiles (Esri World Dark Gray Canvas & OpenStreetMap - no watermark, no key required)
-    L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-      {
-        maxZoom: 16,
-        attribution: '&copy; Esri &mdash; OpenStreetMap contributors',
-      }
-    ).addTo(map);
-
-    L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
-      {
-        maxZoom: 16,
-      }
-    ).addTo(map);
-
-    // Attribution
+    // Attribution control
     L.control
       .attribution({
         prefix: '<a href="https://leafletjs.com" target="_blank" style="color:#64748b;">Leaflet</a> | &copy; <a href="https://www.openstreetmap.org/copyright" style="color:#64748b;">OSM</a>',
@@ -257,10 +242,12 @@ export default function OsmLiveMap({
       })
       .addTo(map);
 
-    // Layer groups for markers & routes
+    // Layer groups
+    const tilesLayer = L.layerGroup().addTo(map);
     const polylinesLayer = L.layerGroup().addTo(map);
     const markersLayer = L.layerGroup().addTo(map);
 
+    tilesLayerRef.current = tilesLayer;
     polylinesLayerRef.current = polylinesLayer;
     markersLayerRef.current = markersLayer;
     mapInstanceRef.current = map;
@@ -268,10 +255,34 @@ export default function OsmLiveMap({
     return () => {
       map.remove();
       mapInstanceRef.current = null;
+      tilesLayerRef.current = null;
       polylinesLayerRef.current = null;
       markersLayerRef.current = null;
     };
   }, [L]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Update Tiles on Theme Change ───────────────────────────────────────────
+  useEffect(() => {
+    if (!L || !mapInstanceRef.current || !tilesLayerRef.current) return;
+
+    tilesLayerRef.current.clearLayers();
+    const variant = isLight ? 'Light' : 'Dark';
+
+    L.tileLayer(
+      `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${variant}_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+      {
+        maxZoom: 16,
+        attribution: '&copy; Esri &mdash; OpenStreetMap contributors',
+      }
+    ).addTo(tilesLayerRef.current);
+
+    L.tileLayer(
+      `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${variant}_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+      {
+        maxZoom: 16,
+      }
+    ).addTo(tilesLayerRef.current);
+  }, [L, isLight]);
 
   // ── Render Polylines ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -286,7 +297,7 @@ export default function OsmLiveMap({
       if (latlngs.length < 2) return;
 
       const polyline = L.polyline(latlngs, {
-        color: alt.selected ? '#00C2FF' : '#4B5563',
+        color: alt.selected ? '#00C2FF' : (isLight ? '#94A3B8' : '#4B5563'),
         weight: alt.selected ? 5 : 4,
         opacity: alt.selected ? 0.95 : 0.6,
         dashArray: alt.selected ? undefined : '6, 8',
@@ -298,13 +309,18 @@ export default function OsmLiveMap({
 
       polyline.addTo(polylinesLayerRef.current);
     });
-  }, [L, showRoute, effectiveRouteAlts, onRouteSelect]);
+  }, [L, showRoute, effectiveRouteAlts, onRouteSelect, isLight]);
 
   // ── Render Markers ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!L || !mapInstanceRef.current || !markersLayerRef.current) return;
 
     markersLayerRef.current.clearLayers();
+
+    const popupBg = isLight ? '#FFFFFF' : '#0F172A';
+    const popupText = isLight ? '#0F172A' : '#F8FAFC';
+    const popupSub = isLight ? '#64748B' : '#94A3B8';
+    const popupBorder = isLight ? '#E2E8F0' : 'rgba(255,255,255,0.12)';
 
     // 1. Destination Marker
     if (hasDestination) {
@@ -321,9 +337,9 @@ export default function OsmLiveMap({
 
       const destMarker = L.marker([destLat, destLng], { icon: destIcon }).addTo(markersLayerRef.current);
       destMarker.bindPopup(`
-        <div style="background:#0F172A;color:#F8FAFC;padding:6px 10px;border-radius:8px;font-family:sans-serif;">
-          <div style="font-weight:700;font-size:12px;color:#38BDF8;">${destName}</div>
-          <div style="font-size:11px;color:#94A3B8;">Trip Destination</div>
+        <div style="background:${popupBg};color:${popupText};padding:6px 10px;border-radius:8px;font-family:sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid ${popupBorder};">
+          <div style="font-weight:700;font-size:12px;color:#00C2FF;">${destName}</div>
+          <div style="font-size:11px;color:${popupSub};">Trip Destination</div>
         </div>
       `);
     }
@@ -344,7 +360,7 @@ export default function OsmLiveMap({
 
       const startMarker = L.marker([startPt.lat, startPt.lng], { icon: startIcon }).addTo(markersLayerRef.current);
       startMarker.bindPopup(`
-        <div style="background:#0F172A;color:#F8FAFC;padding:6px 10px;border-radius:8px;font-family:sans-serif;">
+        <div style="background:${popupBg};color:${popupText};padding:6px 10px;border-radius:8px;font-family:sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid ${popupBorder};">
           <div style="font-weight:700;font-size:12px;color:#10B981;">Trip Origin</div>
         </div>
       `);
@@ -366,9 +382,9 @@ export default function OsmLiveMap({
 
         const alertMarker = L.marker([m.lat + 0.0007, m.lng + 0.0007], { icon: alertIcon }).addTo(markersLayerRef.current);
         alertMarker.bindPopup(`
-          <div style="background:#0F172A;color:#F8FAFC;padding:6px 10px;border-radius:8px;font-family:sans-serif;">
+          <div style="background:${popupBg};color:${popupText};padding:6px 10px;border-radius:8px;font-family:sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid ${popupBorder};">
             <div style="font-weight:700;font-size:12px;color:#F59E0B;">${alert.message}</div>
-            <div style="font-size:11px;color:#94A3B8;">${alert.detail || 'Incident Reported'}</div>
+            <div style="font-size:11px;color:${popupSub};">${alert.detail || 'Incident Reported'}</div>
           </div>
         `);
       });
@@ -390,10 +406,10 @@ export default function OsmLiveMap({
         html: `
           <div style="position:relative;width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
             <div style="position:absolute;width:100%;height:100%;border-radius:50%;background:${style.hex};opacity:0.35;animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
-            <div style="width:28px;height:28px;border-radius:50%;background:#0A0A0A;border:2px solid ${style.hex};color:#ffffff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${style.hex};">
+            <div style="width:28px;height:28px;border-radius:50%;background:${isLight ? '#FFFFFF' : '#0A0A0A'};border:2px solid ${style.hex};color:${isLight ? '#0F172A' : '#ffffff'};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${style.hex};">
               ${initial}
             </div>
-            ${m.isCurrentUser ? `<div style="position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:800;color:${style.hex};background:#000;padding:0 3px;border-radius:3px;border:1px solid ${style.hex};letter-spacing:0.05em;white-space:nowrap;">YOU</div>` : ''}
+            ${m.isCurrentUser ? `<div style="position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:800;color:${style.hex};background:${isLight ? '#FFFFFF' : '#000000'};padding:0 3px;border-radius:3px;border:1px solid ${style.hex};letter-spacing:0.05em;white-space:nowrap;">YOU</div>` : ''}
           </div>
         `,
         iconSize: [38, 38],
@@ -413,7 +429,7 @@ export default function OsmLiveMap({
 
       const marker = L.marker([m.lat, m.lng], { icon: memberIcon }).addTo(markersLayerRef.current);
       marker.bindPopup(`
-        <div style="background:#0F172A;color:#F8FAFC;padding:6px 10px;border-radius:8px;font-family:sans-serif;min-width:110px;">
+        <div style="background:${popupBg};color:${popupText};padding:6px 10px;border-radius:8px;font-family:sans-serif;min-width:110px;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid ${popupBorder};">
           <div style="font-weight:700;font-size:12px;display:flex;align-items:center;gap:4px;">
             <span>${m.name}</span>
             ${m.isCurrentUser ? '<span style="color:#00C2FF;font-size:10px;">(You)</span>' : ''}
@@ -422,7 +438,7 @@ export default function OsmLiveMap({
         </div>
       `);
     });
-  }, [L, effectiveMembers, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts]);
+  }, [L, effectiveMembers, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts, isLight]);
 
   // ── Auto-fit group on initial load ────────────────────────────────────────
   const initialFitDoneRef = useRef(false);
@@ -482,22 +498,22 @@ export default function OsmLiveMap({
   }, []);
 
   return (
-    <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden border border-border bg-[#0A0A0A]">
+    <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden border border-border bg-card">
       {/* Leaflet map container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" style={{ minHeight: '420px' }} />
 
       {/* ── OpenStreetMap Mode Info Pill ───────────────────────────────── */}
       {showInfoBanner && (
-        <div className="absolute top-3 left-3 z-[1000] flex items-center gap-2 bg-[#0A0A0A]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-sky-500/40 text-xs shadow-xl transition-all">
+        <div className="absolute top-3 left-3 z-[1000] flex items-center gap-2 bg-card/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-border text-xs shadow-md transition-all text-foreground">
           <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-          <span className="font-semibold text-sky-200">OpenStreetMap Live</span>
+          <span className="font-semibold text-foreground">OpenStreetMap Live</span>
           <span className="text-[10px] text-muted-foreground hidden sm:inline">
             (Add Google Maps API key in .env.local for Google Satellite)
           </span>
           <button
             type="button"
             onClick={() => setShowInfoBanner(false)}
-            className="text-muted-foreground hover:text-white ml-1 p-0.5"
+            className="text-muted-foreground hover:text-foreground ml-1 p-0.5"
             title="Dismiss notification"
           >
             <X className="w-3 h-3" />
@@ -517,7 +533,7 @@ export default function OsmLiveMap({
                 router.push('/dashboard/route');
               }
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#0A0A0A]/95 hover:bg-[#1A1A1A] active:scale-95 backdrop-blur border border-white/20 text-xs font-semibold text-white shadow-xl transition-all cursor-pointer pointer-events-auto"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-card/95 hover:bg-muted active:scale-95 backdrop-blur border border-border text-xs font-semibold text-foreground shadow-xl transition-all cursor-pointer pointer-events-auto"
             title="Set Destination"
           >
             <MapPin className="w-3.5 h-3.5 text-rally-blue shrink-0" />
@@ -533,28 +549,28 @@ export default function OsmLiveMap({
           onClick={handleLocateMe}
           title="Recenter on my location"
           aria-label="Recenter"
-          className="w-9 h-9 rounded-xl flex items-center justify-center border border-white/10 bg-[#0A0A0A]/90 backdrop-blur text-white hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-xl flex items-center justify-center border border-border bg-card/90 backdrop-blur text-foreground hover:bg-muted transition-colors shadow-sm"
         >
           <LocateFixed className="w-4 h-4" />
         </button>
 
-        <div className="flex flex-col rounded-xl overflow-hidden border border-white/10 bg-[#0A0A0A]/90 backdrop-blur">
+        <div className="flex flex-col rounded-xl overflow-hidden border border-border bg-card/90 backdrop-blur shadow-sm">
           <button
             type="button"
             onClick={handleZoomIn}
             title="Zoom in"
             aria-label="Zoom in"
-            className="w-9 h-9 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            className="w-9 h-9 flex items-center justify-center text-foreground hover:bg-muted transition-colors"
           >
             <Plus className="w-4 h-4" />
           </button>
-          <div className="h-px bg-white/10" />
+          <div className="h-px bg-border" />
           <button
             type="button"
             onClick={handleZoomOut}
             title="Zoom out"
             aria-label="Zoom out"
-            className="w-9 h-9 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            className="w-9 h-9 flex items-center justify-center text-foreground hover:bg-muted transition-colors"
           >
             <Minus className="w-4 h-4" />
           </button>
@@ -565,7 +581,7 @@ export default function OsmLiveMap({
           onClick={handleFitGroup}
           title="Fit entire group in view"
           aria-label="Fit group"
-          className="w-9 h-9 rounded-xl flex items-center justify-center border border-white/10 bg-[#0A0A0A]/90 backdrop-blur text-white hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-xl flex items-center justify-center border border-border bg-card/90 backdrop-blur text-foreground hover:bg-muted transition-colors shadow-sm"
         >
           <Maximize className="w-4 h-4" />
         </button>
@@ -575,10 +591,10 @@ export default function OsmLiveMap({
           onClick={() => setShowRoute((v) => !v)}
           title="Toggle route polyline"
           aria-label="Toggle route"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center border backdrop-blur transition-colors ${
+          className={`w-9 h-9 rounded-xl flex items-center justify-center border backdrop-blur transition-colors shadow-sm ${
             showRoute
               ? 'bg-rally-blue/20 border-rally-blue/50 text-rally-blue'
-              : 'bg-[#0A0A0A]/90 border-white/10 text-white hover:bg-white/10'
+              : 'bg-card/90 border-border text-foreground hover:bg-muted'
           }`}
         >
           <RouteIcon className="w-4 h-4" />

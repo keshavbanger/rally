@@ -75,7 +75,7 @@ export default function BottomNav() {
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
                     className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium ${
-                      active ? 'bg-rally-blue/10 text-rally-blue' : 'text-foreground hover:bg-white/5'
+                      active ? 'bg-rally-blue/10 text-rally-blue' : 'text-foreground hover:bg-muted'
                     }`}
                   >
                     <Icon className="w-4 h-4" /> {item.label}

@@ -75,7 +75,7 @@ export default function Sidebar() {
         <img
           src="/assets/new-rally-logo-transparent.png"
           alt="RALLY"
-          className="h-7 w-auto object-contain opacity-90 hover:opacity-100 transition-opacity"
+          className="h-7 w-auto object-contain opacity-90 hover:opacity-100 transition-opacity dark:filter-none [html:not(.dark)_&]:invert"
         />
       </Link>
 
@@ -97,7 +97,7 @@ export default function Sidebar() {
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       active
                         ? 'bg-rally-blue/10 text-rally-blue border border-rally-blue/30'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -113,7 +113,7 @@ export default function Sidebar() {
       <div className="px-3 py-3 border-t border-border relative">
         <button
           onClick={() => setProfileOpen(!profileOpen)}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors"
         >
           <div className="w-9 h-9 rounded-full bg-rally-blue/20 border border-rally-blue/40 text-rally-blue font-bold flex items-center justify-center text-sm uppercase">
             {displayName.charAt(0)}
@@ -126,18 +126,18 @@ export default function Sidebar() {
         </button>
 
         {profileOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-1 bg-card border border-border rounded-xl shadow-2xl shadow-black/60 overflow-hidden z-50">
+          <div className="absolute bottom-full left-3 right-3 mb-1 bg-card border border-border rounded-xl shadow-xl shadow-black/10 dark:shadow-black/60 overflow-hidden z-50">
             <Link
               href="/dashboard/settings"
               onClick={() => setProfileOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-white/5 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-muted transition-colors"
             >
               <Settings className="w-4 h-4 text-muted-foreground" />
               Settings
             </Link>
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors border-t border-border"
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-red-500/10 transition-colors border-t border-border"
             >
               <LogOut className="w-4 h-4" />
               Logout

@@ -9,26 +9,54 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // New landing-page design system (HSL CSS vars, see globals.css)
+        // Semantic theme system (HSL CSS vars from globals.css)
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         'muted-foreground': 'hsl(var(--muted-foreground))',
-        card: 'hsl(var(--card))',
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
         border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
 
-        // Legacy tokens — still referenced by /login, /register.
-        // Kept flat (not swapped to CSS vars) so those pages don't shift.
-        'card-border': 'rgba(255, 255, 255, 0.12)',
-        'surface-dark': '#28282A',
+        // Brand tokens
+        'card-border': 'hsl(var(--border))',
+        'surface-dark': 'hsl(var(--card))',
         'rally-blue': {
           DEFAULT: '#19BFFF',
           secondary: '#1688FF',
           glow: 'rgba(25, 191, 255, 0.25)',
         },
         'rally-text': {
-          primary: '#FFFFFF',
-          secondary: '#C8C8C8',
-          muted: '#8E8E8E',
+          primary: 'hsl(var(--foreground))',
+          secondary: 'hsl(var(--muted-foreground))',
+          muted: 'hsl(var(--muted-foreground))',
         },
         success: '#22C55E',
         warning: '#F59E0B',
@@ -37,8 +65,8 @@ module.exports = {
       boxShadow: {
         'blue-glow': '0 0 30px rgba(25, 191, 255, 0.25)',
         'blue-glow-lg': '0 0 60px rgba(25, 191, 255, 0.2), 0 0 140px rgba(25, 191, 255, 0.1)',
-        'card': '0 12px 40px rgba(0, 0, 0, 0.8)',
-        'card-hover': '0 20px 50px rgba(0, 0, 0, 0.9)',
+        'card': '0 4px 20px -2px rgba(0, 0, 0, 0.08)',
+        'card-hover': '0 10px 30px -4px rgba(0, 0, 0, 0.12)',
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'system-ui', '-apple-system', 'sans-serif'],

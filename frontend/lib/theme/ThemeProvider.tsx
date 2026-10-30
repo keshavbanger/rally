@@ -1,11 +1,11 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import { settingsService } from "@/lib/mock/settingsService";
 
-type ThemeValue = "dark" | "light" | "system";
+export type ThemeValue = "dark" | "light" | "system";
 
-interface ThemeContextValue {
+export interface ThemeContextValue {
   theme: ThemeValue;
   resolvedTheme: "dark" | "light";
   setTheme: (theme: ThemeValue) => void;
@@ -21,12 +21,12 @@ export function useTheme() {
   return useContext(ThemeContext);
 }
 
-function getSystemTheme(): "dark" | "light" {
+export function getSystemTheme(): "dark" | "light" {
   if (typeof window === "undefined") return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function resolveTheme(theme: ThemeValue): "dark" | "light" {
+export function resolveTheme(theme: ThemeValue): "dark" | "light" {
   if (theme === "system") return getSystemTheme();
   return theme;
 }
@@ -37,49 +37,79 @@ export function applyTheme(resolved: "dark" | "light") {
   if (resolved === "dark") {
     root.classList.add("dark");
     root.classList.remove("light");
+    root.style.colorScheme = "dark";
   } else {
     root.classList.add("light");
     root.classList.remove("dark");
+    root.style.colorScheme = "light";
   }
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeValue>("dark");
+  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("dark");
 
-  useEffect(() => {
-    const stored = settingsService.get().appearance.theme;
-    setThemeState(stored);
-    applyTheme(resolveTheme(stored));
-
-    return settingsService.subscribe((s) => {
-      const next = s.appearance.theme;
-      setThemeState(next);
-      applyTheme(resolveTheme(next));
-    });
+  const updateResolved = useCallback((val: ThemeValue) => {
+    const res = resolveTheme(val);
+    setResolvedTheme(res);
+    applyTheme(res);
   }, []);
 
+  // Sync initial stored theme and subscribe to settingsService updates
+  useEffect(() => {
+    const stored = (settingsService.get().appearance.theme as ThemeValue) || "dark";
+    setThemeState(stored);
+    updateResolved(stored);
+
+    return settingsService.subscribe((s) => {
+      const next = (s.appearance.theme as ThemeValue) || "dark";
+      setThemeState(next);
+      updateResolved(next);
+    });
+  }, [updateResolved]);
+
+  // Listen to OS-level prefers-color-scheme change events
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => {
-      if (settingsService.get().appearance.theme === "system") {
-        applyTheme(getSystemTheme());
+
+    const handleChange = (e: MediaQueryListEvent) => {
+      const current = settingsService.get().appearance.theme as ThemeValue;
+      if (current === "system") {
+        const sys = e.matches ? "dark" : "light";
+        setResolvedTheme(sys);
+        applyTheme(sys);
       }
     };
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+
+    if (mq.addEventListener) {
+      mq.addEventListener("change", handleChange);
+      return () => mq.removeEventListener("change", handleChange);
+    } else {
+      // Legacy fallback
+      mq.addListener(handleChange);
+      return () => mq.removeListener(handleChange);
+    }
   }, []);
 
-  const setTheme = useCallback((next: ThemeValue) => {
-    settingsService.update({
-      appearance: { ...settingsService.get().appearance, theme: next },
-    });
-  }, []);
+  const setTheme = useCallback(
+    (next: ThemeValue) => {
+      setThemeState(next);
+      updateResolved(next);
+      settingsService.update({
+        appearance: { ...settingsService.get().appearance, theme: next },
+      });
+    },
+    [updateResolved]
+  );
 
-  const resolvedTheme = resolveTheme(theme);
+  const contextValue = useMemo(
+    () => ({ theme, resolvedTheme, setTheme }),
+    [theme, resolvedTheme, setTheme]
+  );
 
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme }}>
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

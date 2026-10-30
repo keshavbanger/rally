@@ -37,8 +37,47 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={cn("dark", "scroll-smooth", inter.variable, instrumentSerif.variable, "font-sans")}>
-      <body className="bg-background text-foreground min-h-screen antialiased font-sans selection:bg-white/20 selection:text-white">
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={cn("scroll-smooth", inter.variable, instrumentSerif.variable, "font-sans")}
+    >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var raw = localStorage.getItem('rally:settings');
+                  var theme = 'dark';
+                  if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && parsed.appearance && parsed.appearance.theme) {
+                      theme = parsed.appearance.theme;
+                    }
+                  }
+                  var resolved = theme;
+                  if (theme === 'system') {
+                    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                  }
+                  if (resolved === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.classList.remove('light');
+                    document.documentElement.style.colorScheme = 'dark';
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.classList.add('light');
+                    document.documentElement.style.colorScheme = 'light';
+                  }
+                } catch (e) {
+                  document.documentElement.classList.add('dark');
+                }
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="bg-background text-foreground min-h-screen antialiased font-sans selection:bg-rally-blue/20 selection:text-rally-blue">
         <Providers>{children}</Providers>
       </body>
     </html>

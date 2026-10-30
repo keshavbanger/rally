@@ -118,7 +118,7 @@ function MembersContent({ group }: { group: Group }) {
             </div>
             <button
               onClick={copyCode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-foreground hover:bg-white/10 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted border border-border text-xs font-semibold text-foreground hover:bg-muted/80 transition-colors"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               {copied ? 'Copied' : 'Copy'}
@@ -229,7 +229,7 @@ function MembersContent({ group }: { group: Group }) {
               <code className="text-lg font-mono text-rally-blue font-bold px-2">{group.joinCode}</code>
               <button
                 onClick={copyCode}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/5 text-xs font-semibold text-foreground hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted border border-border text-xs font-semibold text-foreground hover:bg-muted/80 transition-colors"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? 'Copied' : 'Copy'}

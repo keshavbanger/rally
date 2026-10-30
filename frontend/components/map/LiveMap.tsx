@@ -544,19 +544,19 @@ function MapContent({
         <MapControlButton onClick={handleLocateMe} label="Recenter">
           <LocateFixed className="w-4 h-4" />
         </MapControlButton>
-        <div className="flex flex-col rounded-xl overflow-hidden border border-white/10 bg-[#0A0A0A]/90 backdrop-blur">
+        <div className="flex flex-col rounded-xl overflow-hidden border border-border bg-card/90 backdrop-blur">
           <button
             onClick={() => map?.setZoom((map.getZoom() ?? 15) + 1)}
             aria-label="Zoom in"
-            className="w-9 h-9 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            className="w-9 h-9 flex items-center justify-center text-foreground hover:bg-muted transition-colors"
           >
             <Plus className="w-4 h-4" />
           </button>
-          <div className="h-px bg-white/10" />
+          <div className="h-px bg-border" />
           <button
             onClick={() => map?.setZoom((map.getZoom() ?? 15) - 1)}
             aria-label="Zoom out"
-            className="w-9 h-9 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            className="w-9 h-9 flex items-center justify-center text-foreground hover:bg-muted transition-colors"
           >
             <Minus className="w-4 h-4" />
           </button>
@@ -651,7 +651,7 @@ function MapControlButton({
       className={`w-9 h-9 rounded-xl flex items-center justify-center border backdrop-blur transition-colors ${
         active
           ? 'bg-rally-blue/20 border-rally-blue/50 text-rally-blue'
-          : 'bg-[#0A0A0A]/90 border-white/10 text-white hover:bg-white/10'
+          : 'bg-card/90 border-border text-foreground hover:bg-muted'
       }`}
     >
       {children}
