@@ -8,6 +8,7 @@ import EmptyRallyState from '@/components/dashboard/EmptyRallyState';
 import RallyOverview from '@/components/dashboard/RallyOverview';
 import LocationStatus from '@/components/dashboard/LocationStatus';
 import MemberList from '@/components/dashboard/MemberList';
+import GroupHealthCard from '@/components/dashboard/GroupHealthCard';
 import LiveMap from '@/components/map/LiveMap';
 import { ShieldCheck, AlertTriangle } from 'lucide-react';
 
@@ -63,35 +64,7 @@ export default function DashboardPage() {
             <LocationStatus />
             <div className="flex flex-col gap-5">
               <MemberList members={group.members} />
-              
-              {/* Safety Status */}
-              <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em]">SAFETY & RISK</p>
-                  <span className="text-xs font-semibold text-muted-foreground">{group.risk?.level ?? 'LOW RISK'}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      group.alerts.length > 0
-                        ? 'bg-amber-400/10 border border-amber-400/30 text-amber-400'
-                        : 'bg-emerald-400/10 border border-emerald-400/30 text-emerald-400'
-                    }`}
-                  >
-                    {group.alerts.length > 0 ? <AlertTriangle className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {group.alerts.length > 0
-                        ? `${group.alerts.length} active alert${group.alerts.length > 1 ? 's' : ''}`
-                        : 'No active alerts'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {group.alerts.length > 0 ? 'Review alerts in the Alerts tab' : 'Your RALLY is operating safely.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <GroupHealthCard group={group} />
             </div>
           </div>
         </div>

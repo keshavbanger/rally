@@ -74,6 +74,24 @@ def notify(
     notification; only a retry/duplicate delivery of the SAME occurrence
     is suppressed.
     """
+    from app.models.user_setting import UserSetting
+
+    setting = db.scalar(select(UserSetting).where(UserSetting.user_id == user_id))
+    if setting:
+        t_upper = type.upper()
+        if "SOS" in t_upper:
+            if not setting.notifications_sos:
+                return None
+        elif any(c in t_upper for c in ("CONNECTIVITY", "DISCONNECTED", "RECONNECTED", "GPS_SIGNAL")):
+            if not setting.notifications_connectivity:
+                return None
+        elif any(s in t_upper for s in ("SUMMARY", "TRIP_COMPLETED", "ANALYTICS")):
+            if not setting.notifications_trip_summaries:
+                return None
+        elif any(a in t_upper for a in ("ALERT", "FALLING_BEHIND", "ISOLATED", "DEVIATION", "SPEED_ANOMALY", "STOP")):
+            if not setting.notifications_alerts:
+                return None
+
     notification = Notification(
         user_id=user_id,
         trip_id=trip_id,

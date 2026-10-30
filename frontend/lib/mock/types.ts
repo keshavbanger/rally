@@ -52,6 +52,8 @@ export interface RouteWaypoint {
   lng: number;
 }
 
+import type { ApiSOSEvent, DashboardGroupHealth } from '../api/types';
+
 export interface Group {
   id: string;
   name: string;
@@ -63,6 +65,8 @@ export interface Group {
   createdAt: number;
   members: Member[];
   alerts: AlertItem[];
+  activeSOS?: ApiSOSEvent[];
+  groupHealth?: DashboardGroupHealth | null;
   route: RouteWaypoint[];
   trip: TripStats;
   risk: RiskAssessment;
@@ -117,6 +121,7 @@ export interface Settings {
     sos: boolean;
     connectivity: boolean;
     tripSummaries: boolean;
+    soundAlerts: boolean;
   };
   location: {
     sharing: boolean;

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, LogOut, Check } from 'lucide-react';
+import { X, LogOut, Check, Volume2, ShieldAlert } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import Toggle from '@/components/dashboard/Toggle';
 import { useGroup } from '@/lib/group/useGroup';
@@ -10,6 +10,7 @@ import { useSettings } from '@/lib/mock/useSettings';
 import { groupService } from '@/lib/group/groupService';
 import { supabase } from '@/lib/supabase';
 import { updateMe } from '@/lib/api/auth';
+import { playChime } from '@/lib/audio/alertSound';
 import { createPortal } from 'react-dom';
 
 export default function SettingsPage() {
@@ -167,22 +168,209 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        {/* SAFETY & INTELLIGENCE THRESHOLDS */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase">
+              Safety & Intelligence Thresholds
+            </h2>
+            <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded">
+              Synced with backend
+            </span>
+          </div>
+          <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+            {/* Alert Sensitivity */}
+            <div className="p-5 flex items-start sm:items-center justify-between gap-4 flex-col sm:flex-row">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Alert Sensitivity</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Controls how quickly deviations and separations trigger notifications
+                </p>
+              </div>
+              <div className="flex bg-background border border-border rounded-lg p-1 shrink-0">
+                {(['low', 'medium', 'high'] as const).map((lvl) => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => {
+                      update({ safety: { ...settings.safety, alertSensitivity: lvl } });
+                      showToast(`Sensitivity set to ${lvl}`);
+                    }}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors ${
+                      settings.safety.alertSensitivity === lvl
+                        ? 'bg-rally-blue text-white'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Separation Threshold */}
+            <div className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Separation Threshold</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maximum allowed distance before a member is marked as falling behind
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-rally-blue bg-rally-blue/10 px-2.5 py-1 rounded-md">
+                  {settings.safety.separationThresholdM} m
+                </span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={500}
+                step={25}
+                value={settings.safety.separationThresholdM}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  update({ safety: { ...settings.safety, separationThresholdM: val } });
+                }}
+                className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-rally-blue"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+                <span>50m (Strict)</span>
+                <span>250m</span>
+                <span>500m (Relaxed)</span>
+              </div>
+            </div>
+
+            {/* Route Deviation Threshold */}
+            <div className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Route Deviation Threshold</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Distance off the planned route before triggering an off-route alert
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-rally-blue bg-rally-blue/10 px-2.5 py-1 rounded-md">
+                  {settings.safety.routeDeviationThresholdM} m
+                </span>
+              </div>
+              <input
+                type="range"
+                min={30}
+                max={300}
+                step={10}
+                value={settings.safety.routeDeviationThresholdM}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  update({ safety: { ...settings.safety, routeDeviationThresholdM: val } });
+                }}
+                className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-rally-blue"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+                <span>30m (Strict)</span>
+                <span>150m</span>
+                <span>300m (Relaxed)</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* NOTIFICATIONS */}
         <section className="space-y-3">
           <h2 className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase">Notifications</h2>
-          <div className="rounded-2xl border border-border bg-card p-5 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-foreground">RALLY Alerts</p>
-              <p className="text-xs text-muted-foreground mt-1">Safety and trip notifications</p>
+          <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+            {/* RALLY Alerts */}
+            <div className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">RALLY Safety Alerts</p>
+                <p className="text-xs text-muted-foreground mt-1">Real-time alerts for separation, stops, and deviations</p>
+              </div>
+              <Toggle
+                checked={settings.notifications.alerts}
+                onChange={(v) => {
+                  update({ notifications: { ...settings.notifications, alerts: v } });
+                  showToast('Preferences saved');
+                }}
+                label="RALLY Alerts"
+              />
             </div>
-            <Toggle
-              checked={settings.notifications.alerts}
-              onChange={(v) => {
-                update({ notifications: { ...settings.notifications, alerts: v } });
-                showToast('Preferences saved');
-              }}
-              label="RALLY Alerts"
-            />
+
+            {/* Emergency SOS Alerts */}
+            <div className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Emergency SOS Notifications</p>
+                <p className="text-xs text-muted-foreground mt-1">Critical alerts when a member activates one-tap SOS</p>
+              </div>
+              <Toggle
+                checked={settings.notifications.sos}
+                onChange={(v) => {
+                  update({ notifications: { ...settings.notifications, sos: v } });
+                  showToast('Preferences saved');
+                }}
+                label="SOS Notifications"
+              />
+            </div>
+
+            {/* Connectivity Alerts */}
+            <div className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Connectivity & Signal Alerts</p>
+                <p className="text-xs text-muted-foreground mt-1">Notifications when member telemetry or GPS is interrupted</p>
+              </div>
+              <Toggle
+                checked={settings.notifications.connectivity}
+                onChange={(v) => {
+                  update({ notifications: { ...settings.notifications, connectivity: v } });
+                  showToast('Preferences saved');
+                }}
+                label="Connectivity Alerts"
+              />
+            </div>
+
+            {/* Trip Summaries */}
+            <div className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Trip Summaries</p>
+                <p className="text-xs text-muted-foreground mt-1">Summary report notifications after a trip completes</p>
+              </div>
+              <Toggle
+                checked={settings.notifications.tripSummaries}
+                onChange={(v) => {
+                  update({ notifications: { ...settings.notifications, tripSummaries: v } });
+                  showToast('Preferences saved');
+                }}
+                label="Trip Summaries"
+              />
+            </div>
+
+            {/* Audio Alerts */}
+            <div className="p-5 flex items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground">Audible Safety Chimes</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playChime();
+                      showToast('Played test chime');
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rally-blue hover:underline bg-rally-blue/10 px-2 py-0.5 rounded"
+                  >
+                    <Volume2 className="w-3 h-3" /> Test Sound
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Synthesized chimes for standard alerts and urgent sirens for SOS
+                </p>
+              </div>
+              <Toggle
+                checked={settings.notifications.soundAlerts ?? true}
+                onChange={(v) => {
+                  update({ notifications: { ...settings.notifications, soundAlerts: v } });
+                  showToast(v ? 'Audio alerts enabled' : 'Audio alerts muted');
+                }}
+                label="Audible Safety Chimes"
+              />
+            </div>
           </div>
         </section>
 

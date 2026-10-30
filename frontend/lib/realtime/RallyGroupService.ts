@@ -39,8 +39,9 @@ import * as locationsApi from '@/lib/api/locations';
 import * as routesApi from '@/lib/api/routes';
 import * as sosApi from '@/lib/api/sos';
 import * as tripsApi from '@/lib/api/trips';
+import { triggerAlertSound } from '@/lib/audio/alertSound';
 import { ApiError } from '@/lib/api/errors';
-import type { ApiAlert, ApiGroup, ApiGroupMember, ApiTrip, DashboardResponse } from '@/lib/api/types';
+import type { ApiAlert, ApiGroup, ApiGroupMember, ApiSOSEvent, ApiTrip, DashboardResponse } from '@/lib/api/types';
 import { TripSocket } from '@/lib/ws/client';
 import type { ConnectionStatus, ServerMessage, TripStateMember } from '@/lib/ws/types';
 import type { AlertItem, AlertType as MockAlertType, CreateGroupInput, Group, Member, RiskAssessment, SafetyStatus, TripSummary } from '@/lib/mock/types';
@@ -89,6 +90,7 @@ class RallyGroupService implements GroupService {
 
   private livePositions = new Map<string, TripStateMember>();
   private activeAlerts: ApiAlert[] = [];
+  private activeSOS: ApiSOSEvent[] = [];
   private lastDashboard: DashboardResponse | null = null;
 
   private socket: TripSocket | null = null;
@@ -174,9 +176,19 @@ class RallyGroupService implements GroupService {
     await this.refresh();
   }
 
-  async sendSOS(): Promise<void> {
-    if (!this.apiTrip) throw new Error('No active trip.');
-    let position = this.livePositions.get(this.currentUserId ?? '');
+  async transferLeadership(newLeaderId: string): Promise<void> {
+    if (!this.apiGroup) throw new Error('No active group.');
+    await groupsApi.transferLeadership(this.apiGroup.id, newLeaderId);
+    await this.refresh(true);
+  }
+
+  getActiveSOS(): ApiSOSEvent[] {
+    return this.activeSOS;
+  }
+
+  async triggerSOS(message?: string, customCoords?: { latitude: number; longitude: number }): Promise<ApiSOSEvent> {
+    if (!this.apiTrip) throw new Error('No active trip in progress.');
+    let position = customCoords ?? this.livePositions.get(this.currentUserId ?? '');
     if (position?.latitude == null || position?.longitude == null) {
       if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
         try {
@@ -185,17 +197,46 @@ class RallyGroupService implements GroupService {
           });
           position = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude } as any;
         } catch {
-          // Fall through to error below
+          // Fall through to error check
         }
       }
     }
-    // Never fabricate 0,0 — if we genuinely have no live fix yet, refuse
-    // rather than send a meaningless location with an emergency.
     if (position?.latitude == null || position?.longitude == null) {
-      throw new Error('Waiting for a GPS fix — try again in a moment.');
+      throw new Error('Waiting for GPS coordinates — please ensure location permissions are granted.');
     }
-    await sosApi.triggerSOS(this.apiTrip.id, { latitude: position.latitude, longitude: position.longitude });
-    await this.refresh();
+    const sos = await sosApi.triggerSOS(this.apiTrip.id, {
+      latitude: position.latitude,
+      longitude: position.longitude,
+      message: message ?? null,
+    });
+    this.activeSOS = [sos, ...this.activeSOS.filter((s) => s.id !== sos.id)];
+    await this.refresh(true);
+    return sos;
+  }
+
+  async sendSOS(): Promise<void> {
+    await this.triggerSOS();
+  }
+
+  async acknowledgeSOS(sosId: string): Promise<ApiSOSEvent> {
+    const updated = await sosApi.acknowledgeSOS(sosId);
+    this.activeSOS = this.activeSOS.map((s) => (s.id === sosId ? updated : s));
+    await this.refresh(true);
+    return updated;
+  }
+
+  async resolveSOS(sosId: string): Promise<ApiSOSEvent> {
+    const updated = await sosApi.resolveSOS(sosId);
+    this.activeSOS = this.activeSOS.filter((s) => s.id !== sosId);
+    await this.refresh(true);
+    return updated;
+  }
+
+  async cancelSOS(sosId: string): Promise<ApiSOSEvent> {
+    const updated = await sosApi.cancelSOS(sosId);
+    this.activeSOS = this.activeSOS.filter((s) => s.id !== sosId);
+    await this.refresh(true);
+    return updated;
   }
 
   async resolveAlertAsync(alertId: string): Promise<void> {
@@ -685,14 +726,38 @@ class RallyGroupService implements GroupService {
       }
       case 'alert':
       case 'alert_updated':
+        try {
+          const alertData = (message as any).data?.alert || (message as any).data;
+          const eventId = alertData?.id || `alert-${Date.now()}`;
+          const sev = alertData?.severity === 'CRITICAL' ? 'CRITICAL' : 'WARNING';
+          triggerAlertSound(eventId, sev);
+        } catch {
+          // Non-blocking
+        }
+        void this.refresh();
+        break;
       case 'sos':
       case 'sos_updated':
+        try {
+          const sosData = (message as any).data?.sos || (message as any).data;
+          const eventId = sosData?.id || `sos-${Date.now()}`;
+          triggerAlertSound(eventId, 'EMERGENCY');
+        } catch {
+          // Non-blocking
+        }
+        void this.refresh();
+        break;
       case 'intelligence_event':
       case 'route_progress':
       case 'route_deviation':
-        // These change safety/risk/route aggregates in ways only the
-        // dashboard endpoint can recompute correctly — refetch rather
-        // than trying to reconstruct backend-side logic client-side.
+        if (message.type === 'route_deviation') {
+          try {
+            const devId = (message as any).data?.id || `dev-${Date.now()}`;
+            triggerAlertSound(devId, 'WARNING');
+          } catch {
+            // Non-blocking
+          }
+        }
         void this.refresh();
         break;
       case 'trip_ended':
@@ -716,19 +781,21 @@ class RallyGroupService implements GroupService {
     }
 
     try {
-      const [dashboard, members, alerts] = await Promise.all([
+      const [dashboard, members, alerts, activeSosList] = await Promise.all([
         analyticsApi.getDashboard(this.apiTrip.id).catch((err) => {
           console.warn('Dashboard fetch deferred:', err);
           return null;
         }),
         groupsApi.getGroupMembers(this.apiGroup.id).catch(() => [] as ApiGroupMember[]),
         alertsApi.listActiveTripAlerts(this.apiTrip.id).catch(() => [] as ApiAlert[]),
+        sosApi.listActiveTripSOS(this.apiTrip.id).catch(() => [] as ApiSOSEvent[]),
       ]);
       if (dashboard) {
         this.lastDashboard = dashboard;
         this.apiTrip = { ...this.apiTrip, status: dashboard.trip.status };
       }
       this.activeAlerts = Array.isArray(alerts) ? alerts : (alerts as any)?.alerts ?? [];
+      this.activeSOS = Array.isArray(activeSosList) ? activeSosList : [];
       this.rebuildGroup(members);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return; // client.ts already redirects
@@ -815,6 +882,8 @@ class RallyGroupService implements GroupService {
       createdAt: this.apiGroup ? new Date(this.apiGroup.created_at).getTime() : (this.group?.createdAt ?? Date.now()),
       members,
       alerts,
+      activeSOS: this.activeSOS,
+      groupHealth: dashboard?.group_health ?? null,
       route: this.group?.route ?? [],
       trip: {
         distanceKm: dashboard?.route?.distance_meters != null ? dashboard.route.distance_meters / 1000 : (this.group?.trip?.distanceKm ?? 0),

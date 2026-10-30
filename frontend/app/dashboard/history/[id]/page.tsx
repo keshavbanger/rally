@@ -13,6 +13,9 @@ import { getTripSummaryById } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as routesApi from '@/lib/api/routes';
+import * as locationsApi from '@/lib/api/locations';
+import * as alertsApi from '@/lib/api/alerts';
+import type { LocationResponse, ApiAlert } from '@/lib/api/types';
 import type { TripSummary } from '@/lib/mock/types';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/hooks/useGroup';
@@ -21,6 +24,8 @@ export default function TripDetailsPage() {
   const { id } = useParams();
   const { group } = useGroup();
   const [trip, setTrip] = useState<TripSummary | null | undefined>(undefined);
+  const [recordedLocations, setRecordedLocations] = useState<LocationResponse[]>([]);
+  const [tripAlerts, setTripAlerts] = useState<ApiAlert[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,14 +37,19 @@ export default function TripDetailsPage() {
       const local = getTripSummaryById(id);
       if (local) {
         setTrip(local);
-        // Background enrichment: overlay backend analytics on top of local data
+        // Background enrichment: overlay backend analytics, GPS locations & alerts on top of local data
         try {
-          const [analytics, insights, routeData] = await Promise.all([
+          const [analytics, insights, routeData, locations, alerts] = await Promise.all([
             analyticsApi.getTripAnalytics(id).catch(() => null),
             analyticsApi.getTripInsights(id).catch(() => null),
             routesApi.getRoute(id).catch(() => null),
+            locationsApi.getLocationHistory(id, { limit: 1000 }).catch(() => []),
+            alertsApi.listTripAlerts(id).catch(() => []),
           ]);
           if (cancelled) return;
+          if (locations && locations.length > 0) setRecordedLocations(locations);
+          if (alerts && alerts.length > 0) setTripAlerts(alerts);
+
           const routeWaypoints =
             routeData?.route?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
           setTrip((prev) => {
@@ -75,13 +85,18 @@ export default function TripDetailsPage() {
 
       // Fall back to fetching everything from the backend
       try {
-        const [apiTrip, analytics, insights, routeData] = await Promise.all([
+        const [apiTrip, analytics, insights, routeData, locations, alerts] = await Promise.all([
           tripsApi.getTrip(id).catch(() => null),
           analyticsApi.getTripAnalytics(id).catch(() => null),
           analyticsApi.getTripInsights(id).catch(() => null),
           routesApi.getRoute(id).catch(() => null),
+          locationsApi.getLocationHistory(id, { limit: 1000 }).catch(() => []),
+          alertsApi.listTripAlerts(id).catch(() => []),
         ]);
         if (cancelled) return;
+        if (locations && locations.length > 0) setRecordedLocations(locations);
+        if (alerts && alerts.length > 0) setTripAlerts(alerts);
+
         if (apiTrip) {
           const started = apiTrip.started_at
             ? new Date(apiTrip.started_at)
@@ -262,18 +277,30 @@ export default function TripDetailsPage() {
           </div>
         )}
 
-        {/* Route map */}
+        {/* Route map & GPS Replay */}
         <div className="rounded-2xl border border-border bg-card p-4 sm:p-6">
-          <p className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase mb-4">
-            Route Map
-          </p>
-          {trip.route && trip.route.length > 0 ? (
-            <div className="h-[300px] sm:h-[420px]">
-              <RouteReplayMap summary={trip} />
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase">
+              Route & GPS Replay
+            </p>
+            {recordedLocations.length > 0 && (
+              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                {recordedLocations.length} GPS samples
+              </span>
+            )}
+          </div>
+          {(trip.route && trip.route.length > 0) || recordedLocations.length > 0 ? (
+            <div className="h-[360px] sm:h-[460px]">
+              <RouteReplayMap
+                summary={trip}
+                recordedLocations={recordedLocations}
+                plannedRoute={trip.route}
+                alerts={tripAlerts}
+              />
             </div>
           ) : (
             <div className="h-[300px] sm:h-[420px] rounded-xl border border-border bg-background flex items-center justify-center text-muted-foreground text-sm font-medium">
-              Route data unavailable for this trip.
+              Route and GPS location data unavailable for this trip.
             </div>
           )}
         </div>

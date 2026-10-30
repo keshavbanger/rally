@@ -2,11 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Navigation, Navigation2, Clock, Route as RouteIcon, AlertTriangle, ShieldCheck, Flag, Loader2, Users } from 'lucide-react';
+import { MapPin, Navigation, Navigation2, Clock, Route as RouteIcon, AlertTriangle, ShieldCheck, Flag, Loader2, Users, Siren } from 'lucide-react';
 import RequireGroup from '@/components/dashboard/RequireGroup';
 import Topbar from '@/components/dashboard/Topbar';
 import LiveMap from '@/components/map/LiveMap';
 import ConfirmModal from '@/components/dashboard/ConfirmModal';
+import SOSModal from '@/components/dashboard/SOSModal';
+import SOSBanner from '@/components/dashboard/SOSBanner';
+import GroupHealthCard from '@/components/dashboard/GroupHealthCard';
 import { groupService } from '@/lib/group/groupService';
 import { useLocation } from '@/hooks/useLocation';
 import type { Group } from '@/lib/mock/types';
@@ -47,11 +50,31 @@ function TripContent({ group }: { group: Group }) {
     }
   }, [location, isTracking]);
   const [showEndModal, setShowEndModal] = useState(false);
+  const [showSOSModal, setShowSOSModal] = useState(false);
   const [ending, setEnding] = useState(false);
 
   const actualName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'User';
 
   const me = group.members.find((m) => m.isCurrentUser);
+
+  const handleTriggerSOS = async (message?: string) => {
+    await (groupService as any).triggerSOS?.(
+      message,
+      location ? { latitude: location.latitude, longitude: location.longitude } : undefined
+    );
+  };
+
+  const handleAcknowledgeSOS = async (sosId: string) => {
+    await (groupService as any).acknowledgeSOS?.(sosId);
+  };
+
+  const handleResolveSOS = async (sosId: string) => {
+    await (groupService as any).resolveSOS?.(sosId);
+  };
+
+  const handleCancelSOS = async (sosId: string) => {
+    await (groupService as any).cancelSOS?.(sosId);
+  };
 
   const handleEndTrip = async () => {
     setEnding(true);
@@ -91,11 +114,22 @@ function TripContent({ group }: { group: Group }) {
     <div className="min-h-screen flex flex-col h-screen overflow-hidden bg-background">
       <Topbar group={group} gpsState={isTracking ? (location ? 'active' : 'waiting') : (locError ? 'unavailable' : 'off')} />
 
-      <div className="flex-1 p-4 md:p-6 flex flex-col gap-6 overflow-y-auto">
+      <div className="flex-1 p-4 md:p-6 flex flex-col gap-5 overflow-y-auto">
         
-        {/* Header */}
+        {/* Header with One-Tap SOS */}
         <div className="flex items-center justify-between shrink-0">
-          <h1 className="text-2xl font-semibold text-foreground">Live Trip</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-foreground">Live Trip</h1>
+            <button
+              onClick={() => setShowSOSModal(true)}
+              id="trip-sos-btn"
+              className="px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-extrabold text-xs uppercase tracking-wider shadow-[0_0_20px_rgba(239,68,68,0.5)] transition-all flex items-center gap-1.5 animate-pulse"
+              title="Broadcast emergency SOS to all group members"
+            >
+              <Siren className="w-3.5 h-3.5" />
+              One-Tap SOS
+            </button>
+          </div>
           <div className="px-3 py-1.5 rounded-full bg-card border border-border flex items-center gap-1.5 text-xs font-semibold">
             {isActive ? (
               <><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> <span className="text-emerald-400">Trip Active</span></>
@@ -104,6 +138,17 @@ function TripContent({ group }: { group: Group }) {
             )}
           </div>
         </div>
+
+        {/* Real-time Emergency SOS Alert Banner */}
+        {group.activeSOS && group.activeSOS.length > 0 && (
+          <SOSBanner
+            activeSOS={group.activeSOS}
+            currentUserId={user?.id || null}
+            onAcknowledge={handleAcknowledgeSOS}
+            onResolve={handleResolveSOS}
+            onCancel={handleCancelSOS}
+          />
+        )}
 
         {/* Responsive layout */}
         <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
@@ -214,19 +259,8 @@ function TripContent({ group }: { group: Group }) {
               )}
             </div>
 
-            {/* SAFETY */}
-            <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-              <p className="text-[10px] font-bold text-muted-foreground/60 tracking-[0.15em] uppercase">Safety</p>
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-400/10 border border-emerald-400/30 flex items-center justify-center text-emerald-400 shrink-0">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground">No active alerts</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Your RALLY is currently active.</p>
-                </div>
-              </div>
-            </div>
+            {/* GROUP HEALTH & RISK TELEMETRY */}
+            <GroupHealthCard group={group} />
 
             {/* END TRIP */}
             <button
@@ -253,6 +287,13 @@ function TripContent({ group }: { group: Group }) {
           onConfirm={handleEndTrip}
         />
       )}
+
+      <SOSModal
+        isOpen={showSOSModal}
+        onClose={() => setShowSOSModal(false)}
+        onConfirm={handleTriggerSOS}
+        deviceLocation={location}
+      />
     </div>
   );
 }

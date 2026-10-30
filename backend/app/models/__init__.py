@@ -30,6 +30,7 @@ from app.models.route import Route
 from app.models.sos_event import SOSEvent
 from app.models.trip import Trip
 from app.models.trip_analytics_snapshot import TripAnalyticsSnapshot
+from app.models.user_setting import UserSetting
 
 __all__ = [
     "Base",
@@ -44,6 +45,7 @@ __all__ = [
     "Route",
     "TripAnalyticsSnapshot",
     "Notification",
+    "UserSetting",
     "GroupStatus",
     "MemberRole",
     "MemberStatus",

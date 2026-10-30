@@ -17,19 +17,19 @@ export default function TripHistoryPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'All' | 'Completed' | 'Cancelled'>('All');
 
-  // Load trips in effect to avoid hydration mismatch
   const [allTrips, setAllTrips] = useState<TripSummary[] | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function loadTrips() {
-      // Local localStorage trips are the richest — they were saved by
-      // RallyGroupService.endTrip() with full analytics + insights.
-      // Start with them and then append any backend-only items not yet local.
-      const local = getTripHistory();
+      setFetchError(null);
+      // Local localStorage trips saved by this user's active session
+      const local = getTripHistory().filter((t) => t.id !== 'demo-manali-aug22');
 
       try {
-        // Try FastAPI GET /trips/history first, falling back to /users/me/trips
+        // Query user's real trip history from backend
         const remote = await tripsApi.getTripsHistory({ limit: 50 }).catch(() => tripsApi.listMyTripHistory({ limit: 50 }));
         if (cancelled) return;
 
@@ -118,8 +118,11 @@ export default function TripHistoryPage() {
           setAllTrips(merged);
           return;
         }
-      } catch (err) {
-        console.warn('Could not fetch remote trip history, falling back to local:', err);
+      } catch (err: any) {
+        console.warn('Could not fetch remote trip history:', err);
+        if (local.length === 0) {
+          setFetchError(err?.message || 'Could not connect to server to fetch trip history.');
+        }
       }
 
       if (!cancelled) {
@@ -128,10 +131,23 @@ export default function TripHistoryPage() {
     }
     loadTrips();
     return () => { cancelled = true; };
-  }, []);
-
+  }, [retryCount]);
 
   if (allTrips === null) {
+    if (fetchError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center p-6 bg-background">
+          <p className="text-sm font-semibold text-red-400">{fetchError}</p>
+          <button
+            onClick={() => { setAllTrips(null); setRetryCount((c) => c + 1); }}
+            className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white transition-colors"
+          >
+            Retry Loading
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-muted-foreground bg-background">
         <Loader2 className="w-6 h-6 animate-spin" />

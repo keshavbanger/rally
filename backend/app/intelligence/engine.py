@@ -37,9 +37,10 @@ from app.intelligence.detectors import DetectionResult
 from app.intelligence.group_analysis import GroupAnalysisResult, MemberPosition, analyze_group
 from app.intelligence.movement import MovementResult, classify_movement_state
 from app.intelligence.thresholds import Thresholds, current_thresholds
-from app.models.enums import IntelligenceEventType, IntelligenceSeverity, MemberStatus, RouteStatus
+from app.models.enums import IntelligenceEventType, IntelligenceSeverity, MemberRole, MemberStatus, RouteStatus
 from app.models.group_member import GroupMember
 from app.models.profile import Profile
+from app.models.user_setting import UserSetting
 from app.route import service as route_service
 from app.services import live_state_service, presence_service
 from app.websocket.manager import publish_event
@@ -83,20 +84,32 @@ class ComputedState:
     movement_transitions: List[Tuple[str, MovementResult, Optional[str]]] = field(default_factory=list)
 
 
-def _load_active_members_sync(db: Session, group_id: uuid.UUID) -> List[dict]:
-    """Sync DB work — always call through run_in_threadpool. Same query
-    shape as app/websocket/handlers.py's _load_active_members (kept
-    separate rather than shared, since this module must not import from
-    the websocket package — see the module docstring)."""
+def _load_active_members_sync(db: Session, group_id: uuid.UUID) -> Tuple[List[dict], Optional[UserSetting]]:
+    """Sync DB work — always call through run_in_threadpool. Loads active
+    group members and the group leader's persisted safety thresholds."""
     rows = db.execute(
         select(GroupMember, Profile)
         .join(Profile, GroupMember.user_id == Profile.id)
         .where(GroupMember.group_id == group_id, GroupMember.status == MemberStatus.ACTIVE)
     ).all()
-    return [
+    members = [
         {"user_id": member.user_id, "name": profile.full_name, "role": member.role.value}
         for member, profile in rows
     ]
+
+    leader_id = None
+    for member, _ in rows:
+        if member.role == MemberRole.LEADER:
+            leader_id = member.user_id
+            break
+    if not leader_id and members:
+        leader_id = members[0]["user_id"]
+
+    leader_setting = None
+    if leader_id:
+        leader_setting = db.scalar(select(UserSetting).where(UserSetting.user_id == leader_id))
+
+    return members, leader_setting
 
 
 async def _classify_all_members(
@@ -175,9 +188,8 @@ async def compute_current_state(db: Session, redis: Redis, trip_id: uuid.UUID, g
     docstring on why that's safe to call from a read path). Never queries
     location_history."""
     now = datetime.now(timezone.utc)
-    thresholds = current_thresholds()
-
-    members = await run_in_threadpool(_load_active_members_sync, db, group_id)
+    members, leader_setting = await run_in_threadpool(_load_active_members_sync, db, group_id)
+    thresholds = current_thresholds(leader_setting)
     user_ids = [m["user_id"] for m in members]
 
     live_locations = await live_state_service.get_live_locations(redis, trip_id, user_ids)

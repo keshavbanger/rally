@@ -11,6 +11,11 @@ export interface GroupService {
   leaveGroup(): void;
   removeMember(memberId: string): Promise<void>;
   sendSOS(): Promise<void>;
+  triggerSOS(message?: string, customCoords?: { latitude: number; longitude: number }): Promise<any>;
+  acknowledgeSOS?(sosId: string): Promise<any>;
+  resolveSOS?(sosId: string): Promise<any>;
+  cancelSOS?(sosId: string): Promise<any>;
+  getActiveSOS?(): any[];
   resolveAlert(alertId: string): void;
   markAlertAsRead(alertId: string): void;
   markAllAlertsAsRead(): void;
@@ -263,8 +268,22 @@ class RestGroupService implements GroupService {
   }
 
   async sendSOS(): Promise<void> {
+    await this.triggerSOS();
+  }
+
+  async transferLeadership(newLeaderId: string): Promise<void> {
     if (!this.group) return;
-    // Real implementation would hit an endpoint
+    this.group.members = this.group.members.map((m) => {
+      if (m.id === newLeaderId) return { ...m, role: 'Leader' };
+      if (m.role === 'Leader') return { ...m, role: 'Member' };
+      return m;
+    });
+    this.persist();
+  }
+
+  async triggerSOS(message?: string, customCoords?: { latitude: number; longitude: number }): Promise<any> {
+    if (!this.group) return null;
+    return null;
   }
 
   resolveAlert(alertId: string): void {

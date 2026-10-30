@@ -13,6 +13,17 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+const OsmLiveMap = dynamic(() => import('./OsmLiveMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full min-h-[420px] rounded-2xl border border-border bg-[#0A0A0A] flex flex-col items-center justify-center text-muted-foreground gap-3">
+      <div className="w-8 h-8 border-2 border-rally-blue border-t-transparent rounded-full animate-spin" />
+      <p className="text-sm font-medium">Initializing live map…</p>
+    </div>
+  ),
+});
 import {
   APIProvider,
   Map as GoogleMap,
@@ -20,6 +31,8 @@ import {
   Pin,
   useMap,
   InfoWindow,
+  useApiLoadingStatus,
+  APILoadingStatus,
 } from '@vis.gl/react-google-maps';
 import { LocateFixed, Plus, Minus, Maximize, Route as RouteIcon, AlertTriangle, MapPin } from 'lucide-react';
 import type { AlertItem, Group } from '@/lib/mock/types';
@@ -559,33 +572,61 @@ function MapContent({
   );
 }
 
+function GoogleAuthWatcher({ onAuthFailure }: { onAuthFailure: () => void }) {
+  const status = useApiLoadingStatus();
+  useEffect(() => {
+    if (status === APILoadingStatus.AUTH_FAILURE || status === APILoadingStatus.FAILED) {
+      onAuthFailure();
+    }
+  }, [status, onAuthFailure]);
+  return null;
+}
+
 // ─── Root export ──────────────────────────────────────────────────────────────
 
 export default function LiveMap(props: LiveMapProps) {
   const deviceLoc = useDeviceLocation();
+  const [googleAuthFailed, setGoogleAuthFailed] = useState(false);
 
-  // ── Missing API key banner ─────────────────────────────────────────────────
-  if (!hasGoogleMapsKey()) {
+  useEffect(() => {
+    const prevGmAuthFailure = (window as any).gm_authFailure;
+    (window as any).gm_authFailure = () => {
+      console.warn('Google Maps authentication failure (ApiNotActivatedMapError / InvalidKey). Falling back to OpenStreetMap.');
+      setGoogleAuthFailed(true);
+      if (typeof prevGmAuthFailure === 'function') {
+        try {
+          prevGmAuthFailure();
+        } catch (_) {}
+      }
+    };
+
+    return () => {
+      (window as any).gm_authFailure = prevGmAuthFailure;
+    };
+  }, []);
+
+  // ── Fallback to OpenStreetMap when Google Maps key is not configured or failed auth ────
+  if (!hasGoogleMapsKey() || googleAuthFailed) {
     return (
-      <div className="w-full h-full min-h-[420px] rounded-2xl border border-amber-500/30 bg-amber-500/5 flex flex-col items-center justify-center gap-4 p-6 text-center">
-        <AlertTriangle className="w-8 h-8 text-amber-400 shrink-0" />
-        <div>
-          <p className="text-sm font-semibold text-amber-300 mb-1">Google Maps API key required</p>
-          <p className="text-xs text-muted-foreground max-w-xs">
-            Add <code className="bg-white/10 px-1 rounded text-amber-200">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to{' '}
-            <code className="bg-white/10 px-1 rounded text-amber-200">frontend/.env.local</code> and restart the dev server.
-          </p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Enable: <strong>Maps JavaScript API</strong>, <strong>Places API (New)</strong>, and <strong>Routes API</strong> in your Google Cloud project.
-          </p>
-        </div>
+      <div className="relative w-full h-full min-h-[420px]">
+        {googleAuthFailed && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1001] bg-amber-500/95 text-black text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 backdrop-blur">
+            <span>Maps JavaScript API not activated on this key — using OpenStreetMap fallback</span>
+          </div>
+        )}
+        <OsmLiveMap {...props} deviceLoc={deviceLoc} />
       </div>
     );
   }
 
   return (
     <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden border border-border">
-      <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['places', 'geometry']}>
+      <APIProvider
+        apiKey={GOOGLE_MAPS_API_KEY}
+        libraries={['places', 'geometry']}
+        onError={() => setGoogleAuthFailed(true)}
+      >
+        <GoogleAuthWatcher onAuthFailure={() => setGoogleAuthFailed(true)} />
         <MapContent {...props} deviceLoc={deviceLoc} />
       </APIProvider>
     </div>

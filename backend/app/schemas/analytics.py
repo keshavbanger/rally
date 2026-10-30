@@ -403,6 +403,21 @@ class DashboardNotifications(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DashboardGroupHealth(BaseModel):
+    health_score: Optional[int] = None
+    togetherness_percent: Optional[float] = None
+    on_route_percent: Optional[float] = None
+    connectivity_percent: Optional[float] = None
+    stability_percent: Optional[float] = None
+    active_alerts_count: int = 0
+    risk_level: str = "LOW"
+    status_label: str = "INSUFFICIENT_DATA"
+    scoring_method: str = "Deterministic rule-based composite"
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DashboardResponse(BaseModel):
     # "live" = an ACTIVE trip, combining Redis + route progress + active
     # alerts/SOS; "historical" = a COMPLETED/CANCELLED trip, entirely from
@@ -417,5 +432,6 @@ class DashboardResponse(BaseModel):
     eta: DashboardEta
     weather: DashboardWeather
     notifications: DashboardNotifications
+    group_health: Optional[DashboardGroupHealth] = None
 
     model_config = ConfigDict(from_attributes=True)

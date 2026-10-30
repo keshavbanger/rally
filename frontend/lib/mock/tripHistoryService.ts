@@ -60,12 +60,21 @@ function demoSummary(): TripSummary {
   };
 }
 
+export function getDemoTripSummary(): TripSummary {
+  return demoSummary();
+}
+
 function readHistory(): TripSummary[] {
   const existing = readRaw();
-  if (existing) return existing;
-  const seeded = [demoSummary()];
-  write(seeded);
-  return seeded;
+  if (existing) {
+    // Filter out any legacy seeded demo trip so it never contaminates user history
+    const sanitized = existing.filter((t) => t.id !== 'demo-manali-aug22');
+    if (sanitized.length !== existing.length) {
+      write(sanitized);
+    }
+    return sanitized;
+  }
+  return [];
 }
 
 export function getTripHistory(): TripSummary[] {

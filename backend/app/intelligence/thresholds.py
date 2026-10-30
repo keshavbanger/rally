@@ -38,13 +38,14 @@ class Thresholds:
     baseline_route_speed_mps: float
 
 
-def current_thresholds() -> Thresholds:
-    """Reads the live `settings` object on every call, so tests that
-    monkeypatch `settings.X` still take effect, while a single evaluation
-    works from one consistent snapshot rather than re-reading settings
-    mid-calculation."""
+from typing import Any, Optional
+
+
+def current_thresholds(user_setting: Optional[Any] = None) -> Thresholds:
+    """Reads the live `settings` object on every call, and incorporates
+    any configured user safety thresholds and alert sensitivity."""
     s = _settings
-    return Thresholds(
+    base = Thresholds(
         stop_speed_mps=s.STOP_SPEED_MPS,
         stop_duration_seconds=s.STOP_DURATION_SECONDS,
         stale_location_seconds=s.STALE_LOCATION_SECONDS,
@@ -67,3 +68,44 @@ def current_thresholds() -> Thresholds:
         route_progress_stale_seconds=s.ROUTE_PROGRESS_STALE_SECONDS,
         baseline_route_speed_mps=s.BASELINE_ROUTE_SPEED_MPS,
     )
+    if not user_setting:
+        return base
+
+    sep_m = getattr(user_setting, "separation_threshold_m", None) or base.group_separation_distance_meters
+    dev_m = getattr(user_setting, "route_deviation_threshold_m", None) or base.off_route_threshold_meters
+    sensitivity = (getattr(user_setting, "alert_sensitivity", "MEDIUM") or "MEDIUM").upper()
+
+    if sensitivity == "HIGH":
+        factor = 0.8
+        stop_dur = max(20, int(base.stop_duration_seconds * 0.75))
+    elif sensitivity == "LOW":
+        factor = 1.3
+        stop_dur = int(base.stop_duration_seconds * 1.5)
+    else:
+        factor = 1.0
+        stop_dur = base.stop_duration_seconds
+
+    return Thresholds(
+        stop_speed_mps=base.stop_speed_mps,
+        stop_duration_seconds=stop_dur,
+        stale_location_seconds=base.stale_location_seconds,
+        falling_behind_distance_meters=sep_m * 0.6 * factor,
+        falling_behind_duration_seconds=max(5, int(base.falling_behind_duration_seconds * factor)),
+        group_separation_distance_meters=sep_m * factor,
+        group_separation_duration_seconds=max(5, int(base.group_separation_duration_seconds * factor)),
+        isolated_member_distance_meters=sep_m * 1.25 * factor,
+        isolated_member_duration_seconds=max(5, int(base.isolated_member_duration_seconds * factor)),
+        max_reasonable_speed_mps=base.max_reasonable_speed_mps,
+        speed_anomaly_duration_seconds=base.speed_anomaly_duration_seconds,
+        group_cohesion_distance_meters=sep_m * 0.5 * factor,
+        min_usable_accuracy_meters=base.min_usable_accuracy_meters,
+        evaluation_interval_seconds=base.evaluation_interval_seconds,
+        route_endpoint_tolerance_meters=base.route_endpoint_tolerance_meters,
+        off_route_threshold_meters=dev_m * factor,
+        route_deviation_duration_seconds=max(5, int(base.route_deviation_duration_seconds * factor)),
+        arrival_threshold_meters=base.arrival_threshold_meters,
+        arrival_duration_seconds=base.arrival_duration_seconds,
+        route_progress_stale_seconds=base.route_progress_stale_seconds,
+        baseline_route_speed_mps=base.baseline_route_speed_mps,
+    )
+

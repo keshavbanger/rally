@@ -35,3 +35,4 @@ class Profile(Base):
 
     led_groups: Mapped[list["Group"]] = relationship(back_populates="leader")  # noqa: F821
     memberships: Mapped[list["GroupMember"]] = relationship(back_populates="user")  # noqa: F821
+    settings: Mapped[Optional["UserSetting"]] = relationship(back_populates="profile", uselist=False)  # noqa: F821

@@ -301,7 +301,7 @@ export default function SmartAlertsInteractive() {
           className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-white/[0.04] border border-white/10 text-[11px] font-mono tracking-[0.2em] text-white/70 uppercase mb-6"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          SMART ALERTS
+          SMART ALERTS • INTERACTIVE SIMULATION
         </motion.div>
 
         <motion.h1

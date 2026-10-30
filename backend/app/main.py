@@ -126,6 +126,9 @@ app.include_router(route_router, prefix=settings.API_V1_STR)
 from app.api.sos import router as sos_router
 app.include_router(sos_router, prefix=settings.API_V1_STR)
 
+from app.api.settings import router as settings_router
+app.include_router(settings_router, prefix=settings.API_V1_STR)
+
 from app.api.metrics import router as metrics_router
 # The Prometheus /metrics endpoint lives at root (no /api/v1 prefix) to match
 # the standard scrape-endpoint convention and existing test expectations.

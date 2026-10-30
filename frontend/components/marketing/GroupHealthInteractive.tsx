@@ -264,7 +264,7 @@ export default function GroupHealthInteractive() {
             className="w-1.5 h-1.5 rounded-full animate-pulse"
             style={{ backgroundColor: activeConfig.color }}
           />
-          GROUP HEALTH
+          GROUP HEALTH • INTERACTIVE SIMULATION
         </motion.div>
 
         <motion.h1

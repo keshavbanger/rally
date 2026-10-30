@@ -449,6 +449,19 @@ export interface DashboardMember {
   distance_from_group_center_meters: number | null;
 }
 
+export interface DashboardGroupHealth {
+  health_score: number | null;
+  togetherness_percent: number | null;
+  on_route_percent: number | null;
+  connectivity_percent: number | null;
+  stability_percent: number | null;
+  active_alerts_count: number;
+  risk_level: string;
+  status_label: 'OPTIMAL' | 'STABLE' | 'ATTENTION' | 'RISK' | 'INSUFFICIENT_DATA';
+  scoring_method: string;
+  updated_at: string;
+}
+
 export interface DashboardResponse {
   mode: 'live' | 'historical';
   trip: { id: string; name: string | null; status: TripStatus; started_at: string | null };
@@ -485,7 +498,9 @@ export interface DashboardResponse {
     warnings: { type: string; severity: string; reason: string }[];
   };
   notifications: { unread_count: number };
+  group_health?: DashboardGroupHealth | null;
 }
+
 
 // ---- Demo mode (only reachable when the backend has DEMO_MODE=true) -------
 

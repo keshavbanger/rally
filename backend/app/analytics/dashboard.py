@@ -23,6 +23,7 @@ current location/speed a finished trip no longer has).
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import redis.exceptions
@@ -44,6 +45,7 @@ from app.route.service import MemberRouteProgress
 from app.schemas.analytics import (
     DashboardEta,
     DashboardGroup,
+    DashboardGroupHealth,
     DashboardMember,
     DashboardNotifications,
     DashboardResponse,
@@ -96,6 +98,116 @@ def _weather_to_dashboard(weather: WeatherInfo) -> DashboardWeather:
 
 def _risk_to_dashboard(risk: RiskScore) -> DashboardRisk:
     return DashboardRisk(score=risk.score, level=risk.level)
+
+
+def _calculate_group_health(
+    member_count: int,
+    members: List[DashboardMember],
+    online_count: Optional[int],
+    active_alerts_count: int,
+    critical_alerts_count: int,
+    active_sos_count: int,
+    risk_level: str,
+    route_available: bool,
+) -> DashboardGroupHealth:
+    now = datetime.now(timezone.utc)
+    if member_count == 0:
+        return DashboardGroupHealth(
+            health_score=None,
+            togetherness_percent=None,
+            on_route_percent=None,
+            connectivity_percent=None,
+            stability_percent=None,
+            active_alerts_count=active_alerts_count,
+            risk_level=risk_level,
+            status_label="INSUFFICIENT_DATA",
+            updated_at=now,
+        )
+
+    # 1. Connectivity percentage (0-100)
+    if online_count is not None:
+        connectivity_percent = max(0.0, min(100.0, round((online_count / max(1, member_count)) * 100, 1)))
+    else:
+        active_cnt = sum(1 for m in members if m.movement_state or m.route_state)
+        connectivity_percent = max(0.0, min(100.0, round((active_cnt / max(1, member_count)) * 100, 1)))
+
+    # 2. Togetherness percentage (0-100)
+    located_members = [m for m in members if m.distance_from_group_center_meters is not None]
+    if located_members:
+        together_count = sum(1 for m in located_members if m.distance_from_group_center_meters <= 150.0)
+        togetherness_percent = max(0.0, min(100.0, round((together_count / len(located_members)) * 100, 1)))
+    else:
+        togetherness_percent = None
+
+    # 3. On-route percentage (0-100)
+    if route_available:
+        route_members = [m for m in members if m.route_state is not None]
+        if route_members:
+            on_route_count = sum(1 for m in route_members if m.route_state in ("ON_ROUTE", "ARRIVED", "NEAR_ROUTE"))
+            on_route_percent = max(0.0, min(100.0, round((on_route_count / len(route_members)) * 100, 1)))
+        else:
+            on_route_percent = None
+    else:
+        on_route_percent = None
+
+    # 4. Stability percentage (0-100)
+    warning_alerts = max(0, active_alerts_count - critical_alerts_count)
+    penalty = (warning_alerts * 10.0) + (critical_alerts_count * 25.0) + (active_sos_count * 40.0)
+    stability_percent = max(0.0, min(100.0, round(100.0 - penalty, 1)))
+
+    # 5. Composite Health Score (0-100)
+    if togetherness_percent is None and on_route_percent is None:
+        score = int(round(connectivity_percent * 0.5 + stability_percent * 0.5))
+        label = "ATTENTION" if score < 70 else "STABLE"
+        return DashboardGroupHealth(
+            health_score=score,
+            togetherness_percent=None,
+            on_route_percent=None,
+            connectivity_percent=connectivity_percent,
+            stability_percent=stability_percent,
+            active_alerts_count=active_alerts_count,
+            risk_level=risk_level,
+            status_label=label,
+            updated_at=now,
+        )
+
+    weights = []
+    values = []
+    if togetherness_percent is not None:
+        weights.append(0.3)
+        values.append(togetherness_percent)
+    if on_route_percent is not None:
+        weights.append(0.3)
+        values.append(on_route_percent)
+    weights.append(0.2)
+    values.append(connectivity_percent)
+    weights.append(0.2)
+    values.append(stability_percent)
+
+    total_weight = sum(weights)
+    composite = sum(v * w for v, w in zip(values, weights)) / total_weight
+    health_score = int(max(0, min(100, round(composite))))
+
+    if active_sos_count > 0 or health_score < 50:
+        status_label = "RISK"
+    elif critical_alerts_count > 0 or health_score < 70:
+        status_label = "ATTENTION"
+    elif health_score >= 85:
+        status_label = "OPTIMAL"
+    else:
+        status_label = "STABLE"
+
+    return DashboardGroupHealth(
+        health_score=health_score,
+        togetherness_percent=togetherness_percent,
+        on_route_percent=on_route_percent,
+        connectivity_percent=connectivity_percent,
+        stability_percent=stability_percent,
+        active_alerts_count=active_alerts_count,
+        risk_level=risk_level,
+        status_label=status_label,
+        updated_at=now,
+    )
 
 
 async def build_dashboard(db: Session, redis: Optional[Redis], trip: Trip, viewer_user_id: uuid.UUID) -> DashboardResponse:
@@ -251,6 +363,17 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
 
     unread_count = notification_service.get_unread_count(db, viewer_user_id)
 
+    group_health = _calculate_group_health(
+        member_count=member_count,
+        members=members,
+        online_count=online_count,
+        active_alerts_count=len(active_alerts),
+        critical_alerts_count=critical_alerts,
+        active_sos_count=len(active_sos),
+        risk_level=risk.level,
+        route_available=route is not None,
+    )
+
     return DashboardResponse(
         mode="live",
         trip=DashboardTrip(id=trip.id, name=trip.destination_name, status=trip.status.value, started_at=trip.started_at),
@@ -266,6 +389,7 @@ async def _build_live_dashboard(db: Session, redis: Optional[Redis], trip: Trip,
         eta=dashboard_eta,
         weather=dashboard_weather,
         notifications=DashboardNotifications(unread_count=unread_count),
+        group_health=group_health,
     )
 
 
@@ -393,6 +517,17 @@ def _build_historical_dashboard(db: Session, trip: Trip, viewer_user_id: uuid.UU
     risk = calculate_trip_risk(db, trip)
     unread_count = notification_service.get_unread_count(db, viewer_user_id)
 
+    group_health = _calculate_group_health(
+        member_count=len(group_members),
+        members=members,
+        online_count=None,
+        active_alerts_count=len(active_alerts),
+        critical_alerts_count=critical_alerts,
+        active_sos_count=len(active_sos),
+        risk_level=risk.level,
+        route_available=route is not None,
+    )
+
     return DashboardResponse(
         mode="historical",
         trip=DashboardTrip(id=trip.id, name=trip.destination_name, status=trip.status.value, started_at=trip.started_at),
@@ -410,4 +545,5 @@ def _build_historical_dashboard(db: Session, trip: Trip, viewer_user_id: uuid.UU
         eta=DashboardEta(eta_available=False, eta_seconds=None, group_eta_available=False, group_eta_seconds=None, source=None),
         weather=DashboardWeather(weather_available=False),
         notifications=DashboardNotifications(unread_count=unread_count),
+        group_health=group_health,
     )
