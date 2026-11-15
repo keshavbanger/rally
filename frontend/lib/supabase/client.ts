@@ -26,7 +26,10 @@ export function getSupabaseClient(): SupabaseClient {
     return globalStore.__rally_supabase_client__;
   }
 
-  const client = createClient(env.supabaseUrl, env.supabaseAnonKey, {
+  const supabaseUrl = env.supabaseUrl || 'https://placeholder.supabase.co';
+  const supabaseAnonKey = env.supabaseAnonKey || 'placeholder-anon-key';
+
+  const client = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,

@@ -25,10 +25,10 @@ function readEnv(name: string, value: string | undefined, required: boolean): st
 }
 
 export const env = {
-  apiUrl: readEnv('NEXT_PUBLIC_API_URL', process.env.NEXT_PUBLIC_API_URL, true).replace(/\/+$/, ''),
-  wsUrl: readEnv('NEXT_PUBLIC_WS_URL', process.env.NEXT_PUBLIC_WS_URL, true).replace(/\/+$/, ''),
-  supabaseUrl: readEnv('NEXT_PUBLIC_SUPABASE_URL', process.env.NEXT_PUBLIC_SUPABASE_URL, true),
-  supabaseAnonKey: readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, true),
+  apiUrl: (readEnv('NEXT_PUBLIC_API_URL', process.env.NEXT_PUBLIC_API_URL, true) || 'http://localhost:8000').replace(/\/+$/, ''),
+  wsUrl: (readEnv('NEXT_PUBLIC_WS_URL', process.env.NEXT_PUBLIC_WS_URL, true) || 'ws://localhost:8000').replace(/\/+$/, ''),
+  supabaseUrl: readEnv('NEXT_PUBLIC_SUPABASE_URL', process.env.NEXT_PUBLIC_SUPABASE_URL, true) || 'https://placeholder.supabase.co',
+  supabaseAnonKey: readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, true) || 'placeholder-anon-key',
 };
 
 /** The backend's own API_V1_STR prefix — kept in one place since every

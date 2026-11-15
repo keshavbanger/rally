@@ -27,6 +27,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Pytest test suite
+        env:
+          ENVIRONMENT: test
+          JWT_SECRET: test-only-secret-do-not-use-in-production
         run: |
           cd backend
           pytest tests/ -q
@@ -54,4 +57,9 @@ jobs:
         run: npm run lint --workspace=frontend
 
       - name: Production build (Next.js build)
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_WS_URL: ws://localhost:8000
+          NEXT_PUBLIC_SUPABASE_URL: https://yjyzzotkvfxxdxsgtwkv.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqeXp6b3RrdmZ4eGR4c2d0d2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3MTg4NTcsImV4cCI6MjEwMzI5NDg1N30.fi44j7-gkXtvZuQKxLvkpyZ-X40vgfsdRJ428Bn0fsY
         run: npm run build --workspace=frontend

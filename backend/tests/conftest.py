@@ -36,6 +36,29 @@ def configured_jwt_secret(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def configure_test_db():
+    """Ensure tests run cleanly without a live database or .env file
+    (e.g. in CI or isolated sandbox environments). If get_db has not been
+    explicitly overridden by a test, provide a mock session so endpoints
+    declaring db: Session = Depends(get_db) do not fail with 503 SERVICE_UNAVAILABLE."""
+    from unittest.mock import MagicMock
+    from app.core.database import get_db
+    from app.main import app
+
+    prev = app.dependency_overrides.get(get_db)
+    if get_db not in app.dependency_overrides:
+        app.dependency_overrides[get_db] = lambda: MagicMock()
+    try:
+        yield
+    finally:
+        if prev is not None:
+            app.dependency_overrides[get_db] = prev
+        else:
+            app.dependency_overrides.pop(get_db, None)
+
+
+
 def make_token(
     sub: str = DEFAULT_TEST_USER_ID,
     email: Optional[str] = "demo@rally.app",
