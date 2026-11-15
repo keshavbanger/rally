@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowRight, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { groupService } from '@/lib/group/groupService';
 import { friendlyErrorMessage } from '@/lib/api/errors';
+import RequireAuth from '@/components/dashboard/RequireAuth';
 
 type Status = 'idle' | 'loading' | 'invalid' | 'success';
 
@@ -31,7 +32,8 @@ export default function JoinGroupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 py-12 relative overflow-hidden">
+    <RequireAuth>
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 py-12 relative overflow-hidden">
       <div className="absolute w-[500px] h-[500px] bg-rally-blue/10 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="w-full max-w-sm relative z-10">
@@ -116,5 +118,6 @@ export default function JoinGroupPage() {
         )}
       </div>
     </div>
+    </RequireAuth>
   );
 }

@@ -1,20 +1,49 @@
 import type { Metadata } from 'next';
-import { Inter, Instrument_Serif } from 'next/font/google';
+import localFont from 'next/font/local';
 import { Providers } from './providers';
 import './globals.css';
 import { cn } from "@/lib/utils";
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+const inter = localFont({
+  src: [
+    {
+      path: '../public/fonts/Inter-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: '../public/fonts/Inter-Medium.woff2',
+      weight: '500',
+      style: 'normal',
+    },
+    {
+      path: '../public/fonts/Inter-SemiBold.woff2',
+      weight: '600',
+      style: 'normal',
+    },
+    {
+      path: '../public/fonts/Inter-Bold.woff2',
+      weight: '700',
+      style: 'normal',
+    },
+  ],
   variable: '--font-inter',
   display: 'swap',
 });
 
-const instrumentSerif = Instrument_Serif({
-  subsets: ['latin'],
-  weight: ['400'],
-  style: ['normal', 'italic'],
+const instrumentSerif = localFont({
+  src: [
+    {
+      path: '../public/fonts/InstrumentSerif-Regular.ttf',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: '../public/fonts/InstrumentSerif-Italic.ttf',
+      weight: '400',
+      style: 'italic',
+    },
+  ],
   variable: '--font-instrument-serif',
   display: 'swap',
 });

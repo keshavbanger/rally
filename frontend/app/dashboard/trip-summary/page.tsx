@@ -138,7 +138,7 @@ function TripSummaryContent() {
             <CheckCircle2 className="w-7 h-7 text-emerald-400" />
           </div>
           <h1 className="text-2xl md:text-3xl font-semibold text-foreground">Trip Complete</h1>
-          <p className="text-sm text-muted-foreground mt-1.5">Here's how your Rally went.</p>
+          <p className="text-sm text-muted-foreground mt-1.5">Here&apos;s how your Rally went.</p>
           <p className="text-xs text-muted-foreground mt-1">{summary.groupName} · {summary.date}</p>
         </div>
 

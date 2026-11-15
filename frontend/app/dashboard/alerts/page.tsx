@@ -130,7 +130,7 @@ function AlertsContent({ group }: { group: Group }) {
               <div className="w-16 h-16 rounded-full bg-emerald-400/10 border border-emerald-400/30 flex items-center justify-center text-emerald-400 mb-6">
                 <ShieldCheck className="w-8 h-8" />
               </div>
-              <h2 className="text-xl font-bold text-foreground mb-2">You're all clear</h2>
+              <h2 className="text-xl font-bold text-foreground mb-2">You&apos;re all clear</h2>
               <p className="text-muted-foreground text-sm max-w-xs mx-auto">
                 No active alerts for your RALLY. Your group is ready to travel.
               </p>

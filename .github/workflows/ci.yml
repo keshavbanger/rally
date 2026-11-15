@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  backend:
+    name: Backend Tests (Pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Pytest test suite
+        run: |
+          cd backend
+          pytest tests/ -q
+
+  frontend:
+    name: Frontend Quality & Build (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (tsc)
+        run: npx tsc --noEmit --project frontend/tsconfig.json
+
+      - name: Lint (ESLint)
+        run: npm run lint --workspace=frontend
+
+      - name: Production build (Next.js build)
+        run: npm run build --workspace=frontend

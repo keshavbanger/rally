@@ -7,6 +7,7 @@ import { Minus, Plus, Copy, Check, ArrowRight, Users } from 'lucide-react';
 import { buildPreviewGroup } from '@/lib/mock/groupService';
 import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
 import LiveMap from '@/components/map/LiveMap';
+import RequireAuth from '@/components/dashboard/RequireAuth';
 
 const DESTINATIONS = ['Solang Valley', 'Rohtang Pass', 'Kasol', 'Manali', 'Leh Ladakh', 'Spiti Valley'];
 
@@ -68,7 +69,8 @@ export default function CreateGroupPage() {
   const previewGroup = buildPreviewGroup({ name, destination, maxMembers });
 
   return (
-    <div className="min-h-screen bg-background flex flex-col lg:flex-row">
+    <RequireAuth>
+      <div className="min-h-screen bg-background flex flex-col lg:flex-row">
       <div className="w-full lg:w-[440px] shrink-0 border-r border-border flex flex-col justify-between px-6 sm:px-10 py-10 min-h-screen">
         <div>
           <Link href="/" className="inline-flex items-center mb-8">
@@ -220,5 +222,6 @@ export default function CreateGroupPage() {
         </div>
       </div>
     </div>
+    </RequireAuth>
   );
 }
