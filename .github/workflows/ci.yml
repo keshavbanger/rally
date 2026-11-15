@@ -27,9 +27,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Pytest test suite
-        env:
-          ENVIRONMENT: test
-          JWT_SECRET: test-only-secret-do-not-use-in-production
         run: |
           cd backend
           pytest tests/ -q

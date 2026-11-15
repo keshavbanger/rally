@@ -164,7 +164,7 @@ def test_active_member_can_connect_to_active_trip(fake_redis_client):
     p1, p2 = _patched(fake_redis_client, session)
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            snapshot = ws.receive_json()
+            snapshot = _receive_until(ws, "trip_state")
             assert snapshot["type"] == "trip_state"
             assert snapshot["data"]["trip_id"] == str(TRIP_ID)
             assert snapshot["data"]["members"][0]["name"] == "Keshav"
@@ -187,9 +187,9 @@ def test_heartbeat_returns_heartbeat_ack(fake_redis_client):
     p1, p2 = _patched(fake_redis_client, _connected_session())
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            ws.receive_json()  # trip_state snapshot
+            _receive_until(ws, "trip_state")  # trip_state snapshot
             ws.send_json({"type": "heartbeat"})
-            assert ws.receive_json()["type"] == "heartbeat_ack"
+            assert _receive_until(ws, "heartbeat_ack")["type"] == "heartbeat_ack"
 
 
 @patch("app.websocket.handlers.trip_service.get_trip_by_id")
@@ -207,9 +207,9 @@ def test_valid_location_update_returns_location_ack(mock_record, mock_get_trip, 
     p1, p2 = _patched(fake_redis_client, _connected_session())
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            ws.receive_json()  # trip_state snapshot
+            _receive_until(ws, "trip_state")  # trip_state snapshot
             ws.send_json({"type": "location_update", "data": {"latitude": 22.7196, "longitude": 75.8577}})
-            response = ws.receive_json()
+            response = _receive_until(ws, "location_ack")
             assert response["type"] == "location_ack"
             assert response["data"]["accepted"] is True
 
@@ -221,13 +221,13 @@ def test_invalid_location_returns_error_not_disconnect(fake_redis_client):
     p1, p2 = _patched(fake_redis_client, _connected_session())
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            ws.receive_json()  # trip_state snapshot
+            _receive_until(ws, "trip_state")  # trip_state snapshot
             ws.send_json({"type": "location_update", "data": {"latitude": 999, "longitude": 0}})
-            error = ws.receive_json()
+            error = _receive_until(ws, "error")
             assert error["data"]["code"] == "INVALID_LOCATION"
 
             ws.send_json({"type": "heartbeat"})
-            assert ws.receive_json()["type"] == "heartbeat_ack"
+            assert _receive_until(ws, "heartbeat_ack")["type"] == "heartbeat_ack"
 
 
 def test_session_is_closed_on_disconnect(fake_redis_client):
@@ -323,10 +323,10 @@ def test_exceeding_max_connections_per_user_is_rejected(monkeypatch):
 
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws1:
-            ws1.receive_json()  # trip_state snapshot — first connection fully established
+            _receive_until(ws1, "trip_state")  # trip_state snapshot — first connection fully established
 
             with client.websocket_connect(f"{WS_URL}?token={token}") as ws2:
-                error = ws2.receive_json()
+                error = _receive_until(ws2, "error")
                 assert error["type"] == "error"
                 assert error["data"]["code"] == "RATE_LIMITED"
                 with pytest.raises(WebSocketDisconnect):
@@ -335,7 +335,7 @@ def test_exceeding_max_connections_per_user_is_rejected(monkeypatch):
             # The first connection is untouched — rejecting the new one
             # never disturbed it.
             ws1.send_json({"type": "heartbeat"})
-            assert ws1.receive_json()["type"] == "heartbeat_ack"
+            assert _receive_until(ws1, "heartbeat_ack")["type"] == "heartbeat_ack"
 
 
 def test_message_flood_disconnects_after_threshold(fake_redis_client, monkeypatch):
@@ -352,11 +352,11 @@ def test_message_flood_disconnects_after_threshold(fake_redis_client, monkeypatc
     p1, p2 = _patched(fake_redis_client, _connected_session())
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            ws.receive_json()  # trip_state snapshot
+            _receive_until(ws, "trip_state")  # trip_state snapshot
 
             for _ in range(3):
                 ws.send_json({"type": "heartbeat"})
-                msg = ws.receive_json()
+                msg = _receive_until(ws, "error")
                 assert msg["type"] == "error"
                 assert msg["data"]["code"] == "RATE_LIMITED"
 
@@ -375,11 +375,11 @@ def test_single_burst_within_window_is_not_flagged_as_flooding(fake_redis_client
     p1, p2 = _patched(fake_redis_client, _connected_session())
     with p1, p2:
         with client.websocket_connect(f"{WS_URL}?token={token}") as ws:
-            ws.receive_json()  # trip_state snapshot
+            _receive_until(ws, "trip_state")  # trip_state snapshot
             ws.send_json({"type": "heartbeat"})
-            assert ws.receive_json()["type"] == "heartbeat_ack"
+            assert _receive_until(ws, "heartbeat_ack")["type"] == "heartbeat_ack"
             ws.send_json({"type": "heartbeat"})
-            assert ws.receive_json()["type"] == "heartbeat_ack"
+            assert _receive_until(ws, "heartbeat_ack")["type"] == "heartbeat_ack"
 
 
 # ---- regression: existing suites unaffected --------------------------------
