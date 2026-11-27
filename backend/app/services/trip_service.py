@@ -131,9 +131,36 @@ def start_trip(db: Session, trip: Trip, data: Optional[TripStart]) -> Trip:
 
 def end_trip(db: Session, trip: Trip) -> Trip:
     _require_transition(trip, TripStatus.COMPLETED)
-    trip.status = TripStatus.COMPLETED
-    trip.ended_at = datetime.now(timezone.utc)
-    db.commit()
+    # Capture ended_at once (timezone-aware UTC)
+    ended_at = datetime.now(timezone.utc)
+    # Validate started_at if present and compute duration minutes
+    if trip.started_at is not None:
+        if trip.started_at > ended_at:
+            raise AppHTTPException(
+                status_code=400,
+                code="INVALID_STARTED_AT",
+                detail="started_at cannot be in the future.",
+            )
+        duration_seconds = (ended_at - trip.started_at).total_seconds()
+        duration_minutes = max(0, int(duration_seconds // 60))
+    else:
+        duration_minutes = None
+    # Preserve original in-memory state in case commit fails
+    original_status = trip.status
+    original_ended_at = trip.ended_at
+    original_duration = trip.duration
+    try:
+        trip.status = TripStatus.COMPLETED
+        trip.ended_at = ended_at
+        trip.duration = duration_minutes
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Restore original values
+        trip.status = original_status
+        trip.ended_at = original_ended_at
+        trip.duration = original_duration
+        raise
     db.refresh(trip)
     return trip
 
