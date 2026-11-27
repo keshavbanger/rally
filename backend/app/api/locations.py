@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -42,7 +43,7 @@ def _location_rate_limit_per_minute() -> int:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit_by_user("location", _location_rate_limit_per_minute))],
 )
-def submit_location_endpoint(
+async def submit_location_endpoint(
     data: LocationCreate,
     trip: Trip = Depends(require_trip_member),
     user_id: str = Depends(get_current_user_id),
@@ -50,7 +51,27 @@ def submit_location_endpoint(
 ):
     """Record one GPS reading. Requires an active member of the trip's
     group, and the trip must currently be ACTIVE."""
-    return location_service.record_location(db, trip, uuid.UUID(user_id), data)
+    uid = uuid.UUID(user_id)
+    recorded = await run_in_threadpool(location_service.record_location, db, trip, uid, data)
+    try:
+        from app.core.redis import get_redis
+        from app.services import live_state_service, presence_service
+        redis = get_redis()
+        await live_state_service.set_live_location(
+            redis,
+            trip.id,
+            uid,
+            data.latitude,
+            data.longitude,
+            data.accuracy,
+            data.speed,
+            data.heading,
+            recorded.recorded_at,
+        )
+        await presence_service.mark_online(redis, trip.id, uid)
+    except Exception:
+        pass
+    return recorded
 
 
 @router.get("/trips/{trip_id}/locations", response_model=List[LocationHistoryItem])

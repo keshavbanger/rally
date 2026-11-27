@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import RouteReplayMap from '@/components/map/RouteReplayMap';
 import RiskRing from '@/components/dashboard/RiskRing';
-import { getTripSummaryById } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as routesApi from '@/lib/api/routes';
@@ -33,57 +32,7 @@ export default function TripDetailsPage() {
     async function loadTrip() {
       if (typeof id !== 'string') return;
 
-      // Local-first: localStorage has the richest data (saved by endTrip with analytics)
-      const local = getTripSummaryById(id);
-      if (local) {
-        setTrip(local);
-        // Background enrichment: overlay backend analytics, GPS locations & alerts on top of local data
-        try {
-          const [analytics, insights, routeData, locations, alerts] = await Promise.all([
-            analyticsApi.getTripAnalytics(id).catch(() => null),
-            analyticsApi.getTripInsights(id).catch(() => null),
-            routesApi.getRoute(id).catch(() => null),
-            locationsApi.getLocationHistory(id, { limit: 1000 }).catch(() => []),
-            alertsApi.listTripAlerts(id).catch(() => []),
-          ]);
-          if (cancelled) return;
-          if (locations && locations.length > 0) setRecordedLocations(locations);
-          if (alerts && alerts.length > 0) setTripAlerts(alerts);
-
-          const routeWaypoints =
-            routeData?.route?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
-          setTrip((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              distanceKm:
-                analytics?.distance_traveled_meters != null
-                  ? Number((analytics.distance_traveled_meters / 1000).toFixed(1))
-                  : prev.distanceKm,
-              durationMin:
-                analytics?.duration_seconds != null
-                  ? Math.round(analytics.duration_seconds / 60)
-                  : prev.durationMin,
-              membersCount: analytics?.member_count ?? prev.membersCount,
-              alertsCount: analytics?.alerts_count ?? prev.alertsCount,
-              routeDeviations: analytics?.route_deviations ?? prev.routeDeviations,
-              sosCount: analytics?.sos_count ?? prev.sosCount,
-              insights:
-                insights?.highlights?.length ? insights.highlights : prev.insights,
-              route: routeWaypoints.length > 0 ? routeWaypoints : prev.route,
-              destinationLat:
-                routeData?.route?.destination_latitude ?? prev.destinationLat,
-              destinationLng:
-                routeData?.route?.destination_longitude ?? prev.destinationLng,
-            };
-          });
-        } catch {
-          // Enrichment failure is non-fatal — local data is already shown
-        }
-        return;
-      }
-
-      // Fall back to fetching everything from the backend
+      // Authoritative data strictly from the backend APIs
       try {
         const [apiTrip, analytics, insights, routeData, locations, alerts] = await Promise.all([
           tripsApi.getTrip(id).catch(() => null),

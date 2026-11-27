@@ -6,7 +6,6 @@ import { useEffect, useState, Suspense } from 'react';
 import { Route, Clock, Users, BellRing, Navigation2, UsersRound, Octagon, Siren, CheckCircle2, Loader2 } from 'lucide-react';
 import RiskRing from '@/components/dashboard/RiskRing';
 import RouteReplayMap from '@/components/map/RouteReplayMap';
-import { getLatestTripSummary } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as routesApi from '@/lib/api/routes';
@@ -80,11 +79,61 @@ function TripSummaryContent() {
         return;
       }
 
-      // ── Path B: no id in URL → fall back to the most recent local history
-      // entry (written by RallyGroupService.endTrip via saveTripSummary).
-      const local = getLatestTripSummary();
+      // ── Path B: no id in URL → fetch the user's latest completed trip from backend
+      try {
+        const history = await tripsApi.getTripsHistory({ limit: 1 }).catch(() => tripsApi.listMyTripHistory({ limit: 1 }));
+        const latestTrip = history?.items?.[0];
+        if (latestTrip && !cancelled) {
+          const tripId = String(latestTrip.trip_id);
+          const [apiTrip, analytics, insights, routeData] = await Promise.all([
+            tripsApi.getTrip(tripId).catch(() => null),
+            analyticsApi.getTripAnalytics(tripId).catch(() => null),
+            analyticsApi.getTripInsights(tripId).catch(() => null),
+            routesApi.getRoute(tripId).catch(() => null),
+          ]);
+          if (cancelled) return;
+          if (apiTrip) {
+            const started = apiTrip.started_at ? new Date(apiTrip.started_at) : new Date(apiTrip.created_at);
+            const routeWaypoints = routeData?.route?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
+            const remoteSummary: TripSummary = {
+              id: apiTrip.id,
+              groupName: 'Rally Trip',
+              destination: apiTrip.destination_name ?? 'Destination',
+              date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              completedAt: apiTrip.ended_at ? new Date(apiTrip.ended_at).getTime() : Date.now(),
+              distanceKm: analytics?.distance_traveled_meters != null
+                ? Number((analytics.distance_traveled_meters / 1000).toFixed(1))
+                : (apiTrip.distance ? Number((apiTrip.distance / 1000).toFixed(1)) : 0),
+              durationMin: analytics?.duration_seconds != null
+                ? Math.round(analytics.duration_seconds / 60)
+                : (apiTrip.duration ? Math.round(apiTrip.duration / 60) : 0),
+              membersCount: analytics?.member_count ?? 1,
+              alertsCount: analytics?.alerts_count ?? 0,
+              routeDeviations: analytics?.route_deviations ?? 0,
+              separationEvents: null,
+              unexpectedStops: null,
+              sosCount: analytics?.sos_count ?? 0,
+              safetyScore: apiTrip.safety_score ?? 100,
+              riskLevel: 'LOW RISK',
+              route: routeWaypoints,
+              destinationLat: routeData?.route?.destination_latitude ?? 0,
+              destinationLng: routeData?.route?.destination_longitude ?? 0,
+              alertPoints: [],
+              deviationPoint: null,
+              keyEvents: [],
+              insights: insights?.highlights ?? [],
+            };
+            setSummary(remoteSummary);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch latest trip summary from backend:', err);
+      }
+
       if (!cancelled) {
-        setSummary(local ?? null);
+        setSummary(null);
         setLoading(false);
       }
     }

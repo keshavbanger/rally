@@ -33,7 +33,7 @@ def _get_route_or_404(db: Session, trip_id: uuid.UUID) -> Route:
 
 
 @router.post("/trips/{trip_id}/route", response_model=RouteResponse, status_code=201)
-def create_route_endpoint(
+async def create_route_endpoint(
     data: RouteCreate,
     trip: Trip = Depends(require_trip_leader),
     db: Session = Depends(get_db),
@@ -42,7 +42,24 @@ def create_route_endpoint(
     the group leader may do this — see require_trip_leader — and only
     while the trip itself is still CREATED (app/route/service.py enforces
     the state check)."""
-    route = route_service.create_or_replace_route(db, trip, data)
+    route = await run_in_threadpool(route_service.create_or_replace_route, db, trip, data)
+    try:
+        redis = get_redis()
+        from app.websocket.manager import publish_event
+        await publish_event(
+            redis,
+            str(trip.id),
+            {
+                "type": "route_selected",
+                "trip_id": str(trip.id),
+                "route_id": str(route.id),
+                "distance_meters": route.distance_meters,
+                "estimated_duration_seconds": route.estimated_duration_seconds,
+                "destination_name": trip.destination_name,
+            },
+        )
+    except Exception as exc:
+        logger.debug("Skipping route_selected WS broadcast: %s", exc)
     return _serialize_route(route)
 
 

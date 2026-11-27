@@ -6,7 +6,7 @@ import { X, LogOut, Check, Volume2, ShieldAlert } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import Toggle from '@/components/dashboard/Toggle';
 import { useGroup } from '@/hooks/useGroup';
-import { useSettings } from '@/lib/mock/useSettings';
+import { useSettings } from '@/lib/settings/useSettings';
 import { useTheme } from '@/lib/theme/ThemeProvider';
 import { groupService } from '@/lib/group/groupService';
 import { supabase } from '@/lib/supabase';

@@ -6,9 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Search, Compass, Loader2, MapPin, Route as RouteIcon, Shield } from 'lucide-react';
 import Topbar from '@/components/dashboard/Topbar';
 import { useGroup } from '@/hooks/useGroup';
-import { getTripHistory } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
-import { supabase } from '@/lib/supabase/client';
 import type { TripSummary } from '@/lib/mock/types';
 
 export default function TripHistoryPage() {
@@ -25,108 +23,64 @@ export default function TripHistoryPage() {
     let cancelled = false;
     async function loadTrips() {
       setFetchError(null);
-      // Local localStorage trips saved by this user's active session
-      const local = getTripHistory().filter((t) => t.id !== 'demo-manali-aug22');
 
       try {
         // Query user's real trip history from backend
         const remote = await tripsApi.getTripsHistory({ limit: 50 }).catch(() => tripsApi.listMyTripHistory({ limit: 50 }));
         if (cancelled) return;
 
-        let remoteItems = remote?.items;
+        const remoteItems = remote?.items || [];
 
-        // Fallback directly to Supabase if backend returned no items or empty
-        if (!remoteItems || remoteItems.length === 0) {
-          try {
-            const { data: supaTrips } = await supabase
-              .from('trips')
-              .select('id, destination_name, status, started_at, ended_at, distance, duration, safety_score, created_at')
-              .in('status', ['COMPLETED', 'completed', 'ended', 'ENDED'])
-              .order('created_at', { ascending: false })
-              .limit(50);
+        const trips: TripSummary[] = remoteItems.map((t) => {
+          const started = t.started_at ? new Date(t.started_at) : new Date();
+          const distanceKm = t.distance != null
+            ? Number(t.distance.toFixed(1))
+            : (t.distance_meters != null ? Number((t.distance_meters / 1000).toFixed(1)) : null);
+          const durationMin = t.duration != null
+            ? t.duration
+            : ((t.started_at && t.ended_at)
+                ? Math.round((new Date(t.ended_at).getTime() - new Date(t.started_at).getTime()) / 60000)
+                : null);
+          const routeWaypoints = t.route?.coordinates?.map(([lng, lat]: number[]) => ({ lat, lng })) || [];
+          const destName = t.destination_name || t.name || (t.route?.name) || 'Destination';
 
-            if (supaTrips && supaTrips.length > 0) {
-              remoteItems = supaTrips.map((st) => ({
-                trip_id: st.id,
-                name: st.destination_name,
-                destination_name: st.destination_name,
-                status: (st.status?.toUpperCase() || 'COMPLETED') as any,
-                started_at: st.started_at || st.created_at,
-                ended_at: st.ended_at,
-                member_count: 1,
-                distance_meters: st.distance ? Math.round(st.distance * 1000) : null,
-                distance: st.distance,
-                duration: st.duration,
-                safety_score: st.safety_score,
-              }));
-            }
-          } catch (supaErr) {
-            console.warn('Could not query Supabase directly:', supaErr);
-          }
-        }
+          return {
+            id: String(t.trip_id),
+            groupName: t.name || 'Rally Trip',
+            destination: destName,
+            date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
+            distanceKm,
+            durationMin,
+            membersCount: t.member_count || 1,
+            alertsCount: null,
+            routeDeviations: null,
+            separationEvents: null,
+            unexpectedStops: null,
+            sosCount: null,
+            safetyScore: t.safety_score ?? null,
+            riskLevel: t.safety_score != null ? ((t.safety_score >= 80 ? 'LOW RISK' : 'MEDIUM RISK')) : null,
+            route: routeWaypoints,
+            destinationLat: t.route?.destination_latitude ?? 0,
+            destinationLng: t.route?.destination_longitude ?? 0,
+            alertPoints: [],
+            deviationPoint: null,
+            keyEvents: [],
+            insights: [],
+            // preserve status and route flag for display/filter
+            _status: t.status,
+            _hasRoute: !!t.route || routeWaypoints.length > 0,
+          } as TripSummary & { _status: string; _hasRoute?: boolean };
+        });
 
-        if (remoteItems?.length) {
-          const localIds = new Set(local.map((t) => t.id));
-
-          // Map backend items that aren't already in local storage
-          const backendOnly: TripSummary[] = remoteItems
-            .filter((t) => !localIds.has(t.trip_id))
-            .map((t) => {
-              const started = t.started_at ? new Date(t.started_at) : new Date();
-              const distanceKm = t.distance != null
-                ? Number(t.distance.toFixed(1))
-                : (t.distance_meters != null ? Number((t.distance_meters / 1000).toFixed(1)) : null);
-              const durationMin = t.duration != null
-                ? t.duration
-                : ((t.started_at && t.ended_at)
-                    ? Math.round((new Date(t.ended_at).getTime() - new Date(t.started_at).getTime()) / 60000)
-                    : null);
-              const routeWaypoints = t.route?.coordinates?.map(([lng, lat]: number[]) => ({ lat, lng })) || [];
-              const destName = t.destination_name || t.name || (t.route?.name) || 'Destination';
-
-              return {
-                id: String(t.trip_id),
-                groupName: t.name || 'Rally Trip',
-                destination: destName,
-                date: started.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-                completedAt: t.ended_at ? new Date(t.ended_at).getTime() : Date.now(),
-                distanceKm,
-                durationMin,
-                membersCount: t.member_count || 1,
-                alertsCount: null,
-                routeDeviations: null,
-                separationEvents: null,
-                unexpectedStops: null,
-                sosCount: null,
-                safetyScore: t.safety_score ?? null,
-                riskLevel: t.safety_score != null ? ((t.safety_score >= 80 ? 'LOW RISK' : 'MEDIUM RISK')) : null,
-                route: routeWaypoints,
-                destinationLat: t.route?.destination_latitude ?? 0,
-                destinationLng: t.route?.destination_longitude ?? 0,
-                alertPoints: [],
-                deviationPoint: null,
-                keyEvents: [],
-                insights: [],
-                // preserve status and route flag for display/filter
-                _status: t.status,
-                _hasRoute: !!t.route || routeWaypoints.length > 0,
-              } as TripSummary & { _status: string; _hasRoute?: boolean };
-            });
-
-          // Local-first: rich summaries take priority, backend fills the gaps
-          const merged = [...local, ...backendOnly].sort((a, b) => b.completedAt - a.completedAt);
-          setAllTrips(merged);
-          return;
-        }
+        trips.sort((a, b) => b.completedAt - a.completedAt);
+        setAllTrips(trips);
       } catch (err: any) {
         console.warn('Could not fetch remote trip history:', err);
-        if (local.length === 0) {
+        if (!cancelled) {
           setFetchError(err?.message || 'Could not connect to server to fetch trip history.');
+          setAllTrips([]);
         }
-      }
-
-      if (!cancelled) {
-        setAllTrips(local);
       }
     }
     loadTrips();
