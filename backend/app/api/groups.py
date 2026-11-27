@@ -134,9 +134,12 @@ def update_destination_endpoint(
     db: Session = Depends(get_db),
 ):
     """Leader updates official destination for the group."""
-    return group_service.set_official_destination(
+    group = group_service.set_official_destination(
         db, group_id, leader.user_id, update.name, update.latitude, update.longitude
     )
+    db.commit()
+    db.refresh(group)
+    return group
 
 
 @router.patch("/{group_id}/meetup-location", response_model=GroupResponse)

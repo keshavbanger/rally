@@ -257,6 +257,27 @@ def set_official_destination(db: Session, group_id: uuid.UUID, user_id: uuid.UUI
     """Leader updates the official destination (for both journey modes).
 
     Validates that the group is not completed/archived and that the caller is the leader.
+    NOTE: This function no longer commits; the caller must commit the transaction.
+    """
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify a completed or archived session.")
+    if group.leader_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can set the destination.")
+
+    # Validate coordinates
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid latitude or longitude values.")
+
+    group.destination_name = name
+    group.destination = f"POINT({longitude} {latitude})"
+    # Caller is responsible for committing and refreshing.
+    return group
+    """Leader updates the official destination (for both journey modes).
+
+    Validates that the group is not completed/archived and that the caller is the leader.
     """
     group = db.scalars(select(Group).where(Group.id == group_id)).first()
     if not group:

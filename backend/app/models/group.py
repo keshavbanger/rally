@@ -44,3 +44,8 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     # Deliberately NOT cascade="delete" — see Trip.group_id for why a group must not silently destroy trip history.
     trips: Mapped[list["Trip"]] = relationship(back_populates="group")  # noqa: F821
+    suggestions: Mapped[list["DestinationSuggestion"]] = relationship(
+        "DestinationSuggestion",
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )

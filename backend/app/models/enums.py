@@ -90,7 +90,7 @@ class RouteStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
-# New enums for Phase 1
+# New enums for Phase 1
 class JourneyMode(str, enum.Enum):
     """Mode of rally journey.
 
@@ -129,3 +129,14 @@ class ArrivalStatus(str, enum.Enum):
     PENDING = "PENDING"
     ARRIVED = "ARRIVED"
     DEPARTED = "DEPARTED"
+
+class SuggestionStatus(str, enum.Enum):
+    """Status of a destination suggestion.
+
+    PENDING – awaiting leader decision.
+    APPROVED – suggestion accepted and applied.
+    REJECTED – suggestion declined.
+    """
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"

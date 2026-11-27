@@ -21,6 +21,7 @@ from app.models.enums import (
     TripStatus,
 )
 from app.models.group import Group
+from app.models.destination_suggestion import DestinationSuggestion
 from app.models.group_member import GroupMember
 from app.models.intelligence_event import IntelligenceEvent
 from app.models.location_history import LocationHistory
