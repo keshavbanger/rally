@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.errors import AppHTTPException
 from app.dependencies.auth import get_current_user_id
-from app.models.enums import MemberStatus
+from app.models.enums import MemberRole, MemberStatus
 from app.models.group_member import GroupMember
 from app.models.sos_event import SOSEvent
 
@@ -41,4 +41,20 @@ def get_sos_membership(
 
 def require_sos_member(pair: Tuple[SOSEvent, GroupMember] = Depends(get_sos_membership)) -> SOSEvent:
     sos, _member = pair
+    return sos
+
+
+def require_sos_owner_or_leader(
+    pair: Tuple[SOSEvent, GroupMember] = Depends(get_sos_membership),
+    user_id: str = Depends(get_current_user_id),
+) -> SOSEvent:
+    sos, member = pair
+    is_owner = str(sos.user_id) == str(user_id)
+    is_leader = member.role == MemberRole.LEADER
+    if not (is_owner or is_leader):
+        raise AppHTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            detail="Only the SOS owner or the group leader can resolve this emergency.",
+        )
     return sos

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Minus, Plus, Copy, Check, ArrowRight, Users } from 'lucide-react';
 import { buildPreviewGroup } from '@/lib/mock/groupService';
 import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
+import { searchDestination } from '@/lib/services/geocoding';
 import LiveMap from '@/components/map/LiveMap';
 import RequireAuth from '@/components/dashboard/RequireAuth';
 
@@ -18,6 +19,7 @@ export default function CreateGroupPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [maxMembers, setMaxMembers] = useState(5);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -28,19 +30,35 @@ export default function CreateGroupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !destination.trim() || submitting) return;
-    
+
     setSubmitting(true);
+    setSubmitError(null);
+
+    let lat: number | undefined;
+    let lng: number | undefined;
+    try {
+      const places = await searchDestination(destination.trim());
+      if (places.length > 0) {
+        lat = places[0].latitude;
+        lng = places[0].longitude;
+      }
+    } catch {
+      // optional
+    }
+
     try {
       const group = await rallyGroupService.createGroup({
         name: name.trim(),
         destination: destination.trim(),
         maxMembers,
-      });
+        destinationLat: lat,
+        destinationLng: lng,
+      } as any);
 
       setJoinCode(group.joinCode);
     } catch (err: any) {
       console.error('Failed to create group:', err);
-      alert(err.message || 'Failed to create group. Please check your connection and try again.');
+      setSubmitError(err.message || 'Failed to create group. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -87,6 +105,12 @@ export default function CreateGroupPage() {
             <p className="text-sm text-muted-foreground mb-8">
               Bring everyone together and keep the journey connected.
             </p>
+
+            {submitError && (
+              <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium">
+                {submitError}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">

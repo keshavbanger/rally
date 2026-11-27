@@ -13,6 +13,7 @@ import LiveMap from '@/components/map/LiveMap';
 import { searchDestination, Destination } from '@/lib/services/geocoding';
 import { calculateRoute, RouteOption } from '@/lib/services/routing';
 import { groupService } from '@/lib/group/groupService';
+import { useGroup } from '@/hooks/useGroup';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -35,10 +36,13 @@ function useDeviceLocation() {
     }
 
     let fallbackTimer = setTimeout(() => {
-      if (!loc) {
-        setLoc({ lat: 19.076, lng: 72.8777 });
-        setError(true);
-      }
+      setLoc((curr) => {
+        if (!curr) {
+          setError(true);
+          return { lat: 19.076, lng: 72.8777 };
+        }
+        return curr;
+      });
     }, 4000);
 
     navigator.geolocation.getCurrentPosition(
@@ -162,6 +166,8 @@ function StopSearchInput({
 
 export default function RoutePage() {
   const router = useRouter();
+  const { group } = useGroup();
+  const isLeader = group?.members.find((m) => m.isCurrentUser)?.role === 'Leader';
   const { loc: deviceLoc, error: locError } = useDeviceLocation();
 
   // The fixed final destination
@@ -179,6 +185,22 @@ export default function RoutePage() {
 
   // UI
   const [showAddStop, setShowAddStop] = useState(false);
+
+  // Pre-fill destination from group if available (R-2)
+  useEffect(() => {
+    if (group?.destination && group.destination !== 'Destination' && !destination) {
+      if (group.destinationLat && group.destinationLng && (group.destinationLat !== 0 || group.destinationLng !== 0)) {
+        setDestination({
+          name: group.destination,
+          latitude: group.destinationLat,
+          longitude: group.destinationLng,
+        });
+        setDestQuery(group.destination);
+      } else {
+        setDestQuery(group.destination);
+      }
+    }
+  }, [group?.destination, group?.destinationLat, group?.destinationLng, destination]);
 
   // ── helpers ──
 
@@ -245,6 +267,10 @@ export default function RoutePage() {
   };
 
   const handleStartTrip = async () => {
+    if (!isLeader) {
+      setRouteError('Only the group leader can start the trip and set the route.');
+      return;
+    }
     const selectedRoute = routeAlternatives.find((r) => r.id === selectedRouteId);
     if (selectedRoute && destination) {
       try {
@@ -257,11 +283,13 @@ export default function RoutePage() {
           selectedRoute.duration
         );
         await groupService.startTrip();
-      } catch (err) {
-        console.warn('Trip route start warning:', err);
+        router.push('/dashboard/trip');
+      } catch (err: any) {
+        setRouteError(err?.message || 'Failed to start trip on server. Please try again.');
       }
+    } else {
+      setRouteError('Please select a route before starting the trip.');
     }
-    router.push('/dashboard/trip');
   };
 
   const handleReset = () => {
@@ -624,10 +652,14 @@ export default function RoutePage() {
                       </button>
                       <button
                         onClick={handleStartTrip}
-                        disabled={!selectedRouteId}
+                        disabled={!selectedRouteId || !isLeader}
                         className="flex-1 py-3.5 rounded-xl bg-rally-blue text-background text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                       >
-                        Start Trip <ArrowRight className="w-4 h-4" />
+                        {isLeader ? (
+                          <>Start Trip <ArrowRight className="w-4 h-4" /></>
+                        ) : (
+                          'Leader Only'
+                        )}
                       </button>
                     </div>
                   </div>

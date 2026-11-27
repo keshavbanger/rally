@@ -49,6 +49,7 @@ function TripContent({ group }: { group: Group }) {
         location.longitude,
         location.speed,
         location.heading,
+        location.accuracy,
       );
     }
   }, [location, isTracking]);

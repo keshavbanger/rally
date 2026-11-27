@@ -10,7 +10,7 @@ from app.core.errors import AppHTTPException
 from app.core.rate_limit import rate_limit_by_user
 from app.core.redis import get_redis
 from app.dependencies.auth import get_current_user_id
-from app.dependencies.sos import require_sos_member
+from app.dependencies.sos import require_sos_member, require_sos_owner_or_leader
 from app.dependencies.trip import require_trip_member
 from app.models.enums import SOSStatus, TripStatus
 from app.models.sos_event import SOSEvent
@@ -113,7 +113,7 @@ async def acknowledge_sos_endpoint(
 
 @router.post("/sos/{sos_id}/resolve", response_model=SOSResponse)
 async def resolve_sos_endpoint(
-    sos: SOSEvent = Depends(require_sos_member),
+    sos: SOSEvent = Depends(require_sos_owner_or_leader),
     db: Session = Depends(get_db),
 ):
     updated = await sos_service.resolve_sos(db, _get_redis_or_none(), sos)

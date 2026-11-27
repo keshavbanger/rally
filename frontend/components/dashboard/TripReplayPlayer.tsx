@@ -34,7 +34,10 @@ function ReplayMapContent({
   const [activePopup, setActivePopup] = useState<string | null>(null);
   const didFit = useRef(false);
 
-  const positions = frame?.members.filter((m) => m.latitude != null && m.longitude != null) ?? [];
+  const positions = useMemo(
+    () => frame?.members.filter((m) => m.latitude != null && m.longitude != null) ?? [],
+    [frame]
+  );
 
   useEffect(() => {
     if (!map || positions.length === 0 || didFit.current) return;

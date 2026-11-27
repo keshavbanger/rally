@@ -13,7 +13,7 @@
  * - Google Maps rendering when API key is present, with an interactive SVG vector replay fallback
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIProvider,
   Map,
@@ -334,11 +334,11 @@ function VectorReplayCanvas({
   }, [allCoords]);
 
   // Project lat/lng to SVG 0..1000 width, 0..500 height
-  const project = (lat: number, lng: number) => {
+  const project = useCallback((lat: number, lng: number) => {
     const x = ((lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * 1000;
     const y = (1 - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * 500;
     return { x, y };
-  };
+  }, [bounds]);
 
   const plannedSvgPath = useMemo(() => {
     if (plannedPath.length < 2) return '';
@@ -348,7 +348,7 @@ function VectorReplayCanvas({
         return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
-  }, [plannedPath, bounds]);
+  }, [plannedPath, project]);
 
   const fullActualSvgPath = useMemo(() => {
     if (points.length < 2) return '';
@@ -358,7 +358,7 @@ function VectorReplayCanvas({
         return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
-  }, [points, bounds]);
+  }, [points, project]);
 
   const traversedSvgPath = useMemo(() => {
     if (points.length < 2) return '';
@@ -369,7 +369,7 @@ function VectorReplayCanvas({
         return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
-  }, [points, currentIndex, bounds]);
+  }, [points, currentIndex, project]);
 
   const currentPt = points[Math.min(currentIndex, points.length - 1)];
   const currentPos = currentPt ? project(currentPt.lat, currentPt.lng) : null;

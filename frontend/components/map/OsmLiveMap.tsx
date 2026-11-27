@@ -447,7 +447,7 @@ export default function OsmLiveMap({
         </div>
       `);
     });
-  }, [L, effectiveMembers, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts, isLight]);
+  }, [L, effectiveMembers, group?.members, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts, isLight]);
 
   // ── Auto-fit group on initial load ────────────────────────────────────────
   const initialFitDoneRef = useRef(false);

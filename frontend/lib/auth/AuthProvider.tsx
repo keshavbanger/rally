@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { settingsService } from '@/lib/mock/settingsService';
+import { rallyGroupService } from '@/lib/realtime/RallyGroupService';
 
 /** Discriminated outcome for signUpWithPassword so the UI can react
  * precisely to each scenario without guessing. */
@@ -122,6 +123,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    try {
+      await rallyGroupService.teardown();
+    } catch {
+      // non-blocking
+    }
     await supabase.auth.signOut();
   }, []);
 

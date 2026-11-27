@@ -107,33 +107,6 @@ class Settings(BaseSettings):
     REDIS_RETRY_LIMIT: int = 5
     REDIS_RETRY_MAX_BACKOFF_SECONDS: float = 30.0
 
-    # --- Rate limiting (Redis-backed — see app/core/rate_limit.py) ---
-    RATE_LIMIT_ENABLED: bool = True
-    # Catch-all applied to every request by RequestIDMiddleware (see
-    # app/core/middleware.py) — the specific limits below are stricter
-    # overrides layered on top for endpoints that warrant it, not a
-    # replacement for this general one.
-    GENERAL_API_RATE_LIMIT_PER_MINUTE: int = 100
-    # /auth/me and similar caller-identity endpoints.
-    AUTH_RATE_LIMIT_PER_MINUTE: int = 10
-    # POST /groups/join — the one endpoint where a client is guessing a
-    # secret (the join code); see JOIN CODE PROTECTION in the README.
-    JOIN_GROUP_RATE_LIMIT_PER_MINUTE: int = 10
-    # Deliberately not "strict" in the sense of blocking real emergencies:
-    # see the SOS idempotency check in app/sos/service.py, which is the
-    # actual defense against accidental duplicate-trigger spam. This limit
-    # only guards against distinct trigger/cancel/retrigger abuse loops.
-    SOS_RATE_LIMIT_PER_MINUTE: int = 5
-
-    # --- Database connection pool (see app/core/database.py) ---
-    DATABASE_POOL_SIZE: int = 5
-    DATABASE_MAX_OVERFLOW: int = 10
-    DATABASE_POOL_TIMEOUT_SECONDS: int = 30
-    # Recycle a pooled connection after this long — protects against a
-    # managed Postgres provider (Supabase included) silently dropping
-    # idle connections server-side before the pool notices.
-    DATABASE_POOL_RECYCLE_SECONDS: int = 1800
-
     # --- Request body size (Part 2 — input validation) ---
     # Rejects a request outright (413) when its declared Content-Length
     # exceeds this — see app/core/middleware.py::MaxBodySizeMiddleware.
@@ -312,6 +285,8 @@ class Settings(BaseSettings):
                     "manipulates trip/GPS data through the real pipeline and must never run against a "
                     "production deployment."
                 )
+            if self.DEV_MODE_RATE_LIMIT_EXEMPT:
+                self.DEV_MODE_RATE_LIMIT_EXEMPT = False
         return self
 
     # -------------------------------------------------------------------------

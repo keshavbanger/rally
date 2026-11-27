@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.dependencies.sos import require_sos_member
+from app.dependencies.sos import require_sos_member, require_sos_owner_or_leader
 from app.dependencies.trip import require_trip_member
 from app.main import app
 from app.models.enums import SOSStatus, TripStatus
@@ -74,9 +74,11 @@ def as_trip_member():
 def as_sos_member():
     sos = make_mock_sos()
     app.dependency_overrides[require_sos_member] = lambda: sos
+    app.dependency_overrides[require_sos_owner_or_leader] = lambda: sos
     app.dependency_overrides[get_db] = lambda: MagicMock()
     yield sos
     app.dependency_overrides.pop(require_sos_member, None)
+    app.dependency_overrides.pop(require_sos_owner_or_leader, None)
     app.dependency_overrides.pop(get_db, None)
 
 

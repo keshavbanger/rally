@@ -20,10 +20,13 @@ env/
 
 # Env files
 .env
+.env*
 .env.local
 .env.*.local
 .env.development
 .env.production
+*.backup*
+*.backup_*
 
 # Logs
 *.log
@@ -47,6 +50,7 @@ coverage/
 *.timestamp-*.mjs
 dump.rdb
 test_evidence/
+test-results/
 features_verification_report.json
 *.test.js
 scratch_*.js
@@ -54,3 +58,8 @@ verify_*.js
 rally_full_test.js
 test_ws_alerts.js
 test_route_deviation.js
+auth_audit*.mjs
+test_gap1_regression.mjs
+test_sync_captured.mjs
+extract_token.mjs
+check_jwt.py

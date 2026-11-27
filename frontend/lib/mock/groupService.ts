@@ -25,7 +25,7 @@ export interface GroupService {
   setTripRoute(destination: string, destLat: number, destLng: number, route: {lat: number, lng: number}[], distanceMeters: number, durationSeconds: number): void | Promise<void>;
   startTrip(): void | Promise<void>;
   subscribe(listener: (group: Group | null) => void): () => void;
-  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void;
+  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null, accuracy?: number | null): void;
 }
 
 const STORAGE_KEY = 'rally:realGroup';
@@ -241,7 +241,7 @@ class RestGroupService implements GroupService {
   }
 
   // Called by React hook when real GPS position changes
-  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null): void {
+  updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null, accuracy?: number | null): void {
     // Update local state immediately so the map renders the marker
     if (this.group && this.currentUserId) {
       const updatedMembers = this.group.members.map(m =>

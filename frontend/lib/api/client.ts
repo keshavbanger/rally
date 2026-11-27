@@ -18,6 +18,7 @@ export interface RequestOptions {
   body?: unknown;
   query?: Record<string, unknown>;
   signal?: AbortSignal;
+  timeoutMs?: number;
   /** Skip attaching a token entirely — for the rare endpoint that's
    * reachable unauthenticated. Nothing in this app currently needs this
    * for a real data call, but health checks during dev do. */
@@ -109,18 +110,30 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     // connection failure produces — log which it actually was.
     const url = buildUrl(path, query);
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+    }
+
     try {
       return await fetch(url, {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal,
+        signal: controller.signal,
       });
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') {
         console.error(`[api] fetch failed for ${method} ${url}:`, err);
       }
       throw new NetworkError();
+    } finally {
+      clearTimeout(timeout);
     }
   };
 

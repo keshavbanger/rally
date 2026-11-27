@@ -111,7 +111,7 @@ def get_trip_endpoint(trip: Trip = Depends(require_trip_member)):
 @router.post("/trips/{trip_id}/start", response_model=TripResponse)
 def start_trip_endpoint(
     data: Optional[TripStart] = None,
-    trip: Trip = Depends(require_trip_member),
+    trip: Trip = Depends(require_trip_creator_or_leader),
     db: Session = Depends(get_db),
 ):
     """CREATED -> ACTIVE. Rejected with 409 if the group already has
@@ -131,7 +131,7 @@ def start_trip_endpoint(
 
 @router.post("/trips/{trip_id}/end", response_model=TripResponse)
 async def end_trip_endpoint(
-    trip: Trip = Depends(require_trip_member),
+    trip: Trip = Depends(require_trip_creator_or_leader),
     db: Session = Depends(get_db),
 ):
     """ACTIVE -> COMPLETED. Also tells any live WebSocket connections for

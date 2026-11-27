@@ -19,7 +19,8 @@ export default function LocationStatus() {
         location.latitude,
         location.longitude,
         location.speed,
-        location.heading
+        location.heading,
+        location.accuracy
       );
     }
   }, [location, isTracking]);

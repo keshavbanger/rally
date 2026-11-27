@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from app.alerts import service as alerts_service
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.dependencies.alert import require_alert_member
+from app.dependencies.alert import require_alert_member, require_alert_owner_or_leader
 from app.dependencies.trip import require_trip_member
 from app.models.alert import Alert
 from app.models.enums import AlertSeverity, AlertStatus, AlertType
@@ -121,7 +121,7 @@ async def acknowledge_alert_endpoint(
 
 @router.post("/alerts/{alert_id}/resolve", response_model=AlertResponse)
 async def resolve_alert_endpoint(
-    alert: Alert = Depends(require_alert_member),
+    alert: Alert = Depends(require_alert_owner_or_leader),
     db: Session = Depends(get_db),
 ):
     updated = await run_in_threadpool(alerts_service.resolve_alert, db, alert)

@@ -168,11 +168,22 @@ export interface ServerErrorMessage {
   data: { code: string; message: string };
 }
 
+export interface ServerTripStartedMessage {
+  type: 'trip_started';
+  data?: any;
+}
+
+export interface ServerRouteSelectedMessage {
+  type: 'route_selected' | 'route_created';
+  data?: any;
+}
+
 export type ServerMessage =
   | ServerTripStateMessage
   | ServerLocationUpdateMessage
   | ServerLocationAckMessage
   | ServerPresenceUpdateMessage
+  | ServerTripStartedMessage
   | ServerTripEndedMessage
   | ServerHeartbeatAckMessage
   | ServerIntelligenceEventMessage
@@ -182,6 +193,7 @@ export type ServerMessage =
   | ServerSosUpdatedMessage
   | ServerRouteProgressMessage
   | ServerRouteDeviationMessage
+  | ServerRouteSelectedMessage
   | ServerErrorMessage;
 
 export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING' | 'ERROR';

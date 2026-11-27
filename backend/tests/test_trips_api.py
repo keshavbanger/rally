@@ -85,9 +85,11 @@ def as_group_member():
 def as_trip_member():
     trip = make_mock_trip()
     app.dependency_overrides[require_trip_member] = lambda: trip
+    app.dependency_overrides[require_trip_creator_or_leader] = lambda: trip
     app.dependency_overrides[get_db] = lambda: MagicMock()
     yield trip
     app.dependency_overrides.pop(require_trip_member, None)
+    app.dependency_overrides.pop(require_trip_creator_or_leader, None)
     app.dependency_overrides.pop(get_db, None)
 
 

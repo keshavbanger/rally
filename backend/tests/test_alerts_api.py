@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.dependencies.alert import require_alert_member
+from app.dependencies.alert import require_alert_member, require_alert_owner_or_leader
 from app.dependencies.trip import require_trip_member
 from app.main import app
 from app.models.enums import AlertSeverity, AlertStatus, AlertType
@@ -72,9 +72,11 @@ def as_trip_member():
 def as_alert_member():
     alert = make_mock_alert()
     app.dependency_overrides[require_alert_member] = lambda: alert
+    app.dependency_overrides[require_alert_owner_or_leader] = lambda: alert
     app.dependency_overrides[get_db] = lambda: MagicMock()
     yield alert
     app.dependency_overrides.pop(require_alert_member, None)
+    app.dependency_overrides.pop(require_alert_owner_or_leader, None)
     app.dependency_overrides.pop(get_db, None)
 
 

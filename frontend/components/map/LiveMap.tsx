@@ -227,7 +227,7 @@ function MapContent({
   const hasDestination = destLat !== 0 || destLng !== 0;
 
   // Centre: prefer device location, then group members, then destination
-  const center: google.maps.LatLngLiteral =
+  const center: google.maps.LatLngLiteral = useMemo(() =>
     deviceLoc ??
     (validMembers.length
       ? {
@@ -236,7 +236,9 @@ function MapContent({
         }
       : hasDestination
       ? { lat: destLat, lng: destLng }
-      : { lat: 19.076, lng: 72.8777 }); // Mumbai default
+      : { lat: 19.076, lng: 72.8777 }), // Mumbai default
+    [deviceLoc, validMembers, hasDestination, destLat, destLng]
+  );
 
   const onRouteSelectRef = useRef(onRouteSelect);
   onRouteSelectRef.current = onRouteSelect;
