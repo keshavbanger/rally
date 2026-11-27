@@ -1,5 +1,4 @@
 import secrets
-import string
 import uuid
 from typing import List, Optional
 
@@ -7,12 +6,12 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.models.enums import GroupStatus, MemberRole, MemberStatus
+from app.models.enums import GroupStatus, MemberRole, MemberStatus, JourneyMode, SessionStatus, ArrivalStatus
 from app.models.group import Group
 from app.models.group_member import GroupMember
 from app.models.profile import Profile
 from app.notifications import service as notification_service
-from app.schemas.group import GroupCreate
+from app.schemas.group import GroupCreate, GroupMemberResponse
 from app.services.profile_service import get_or_create_profile
 
 
@@ -25,20 +24,23 @@ def generate_join_code() -> str:
 
 
 def create_group(db: Session, user_id: uuid.UUID, group_data: GroupCreate) -> Group:
-    """Create a new group and make the creator the leader."""
+    """Create a new group and make the creator the leader.
+
+    Handles journey mode and initializes session status.
+    """
     get_or_create_profile(db, str(user_id))
-    
+
     # 1. Generate unique join code
     join_code = generate_join_code()
-    # Ensure uniqueness loop (simple implementation, practically collision is very low)
     while db.scalars(select(Group).where(Group.join_code == join_code)).first():
         join_code = generate_join_code()
 
-    # 2. Create the Group
+    # 2. Build destination point if lat/lng provided (initial destination optional)
     destination = None
     if group_data.latitude is not None and group_data.longitude is not None:
         destination = f"POINT({group_data.longitude} {group_data.latitude})"
 
+    # 3. Create the Group with journey mode and session status defaults
     group = Group(
         name=group_data.name,
         join_code=join_code,
@@ -46,11 +48,13 @@ def create_group(db: Session, user_id: uuid.UUID, group_data: GroupCreate) -> Gr
         destination_name=group_data.destination_name,
         destination=destination,
         status=GroupStatus.ACTIVE,
+        journey_mode=group_data.journey_mode,
+        session_status=SessionStatus.CREATED,
     )
     db.add(group)
-    db.flush()  # To get group.id
+    db.flush()  # To obtain group.id
 
-    # 3. Create Leader Membership
+    # 4. Create Leader Membership
     member = GroupMember(
         group_id=group.id,
         user_id=user_id,
@@ -60,21 +64,26 @@ def create_group(db: Session, user_id: uuid.UUID, group_data: GroupCreate) -> Gr
     db.add(member)
     db.commit()
     db.refresh(group)
-    
     return group
 
 
 def join_group(db: Session, user_id: uuid.UUID, join_code: str) -> Group:
-    """Join an active group using its join code."""
+    """Join an active group using its join code.
+
+    Reject joins to groups whose session is COMPLETED or ARCHIVED.
+    """
     get_or_create_profile(db, str(user_id))
     join_code = join_code.strip().upper()
-    
+
     group = db.scalars(select(Group).where(Group.join_code == join_code)).first()
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found or invalid join code.")
-        
+
+    # Reject non‑active groups or completed/archived sessions
     if group.status != GroupStatus.ACTIVE:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot join a non-active group.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot join a non‑active group.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot join a completed or archived session.")
 
     # Check existing membership
     existing_member = db.scalars(
@@ -85,16 +94,10 @@ def join_group(db: Session, user_id: uuid.UUID, join_code: str) -> Group:
         if existing_member.status == MemberStatus.ACTIVE:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already an active member of this group.")
         elif existing_member.status == MemberStatus.REMOVED:
-            # Deliberately the same generic wording as the "non-active
-            # group" 403 above, not "you were removed from this group" —
-            # see JOIN CODE PROTECTION in the README: a controlled
-            # response that rejects the join without confirming anything
-            # about this code/group's history back to the caller.
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot join this group.")
         elif existing_member.status == MemberStatus.LEFT:
-            # Rejoin logic
+            # Rejoin logic – demote to member just in case they were a leader previously
             existing_member.status = MemberStatus.ACTIVE
-            # Demote to member just in case they were a leader previously (though a leader cannot leave without transferring)
             existing_member.role = MemberRole.MEMBER
             db.commit()
             db.refresh(group)
@@ -116,13 +119,15 @@ def join_group(db: Session, user_id: uuid.UUID, join_code: str) -> Group:
 
 
 def _notify_member_joined(db: Session, group: Group, new_member_id: uuid.UUID) -> None:
-    """Every OTHER active member is told; the join/leave events
-    themselves are naturally infrequent, human-initiated actions (not an
-    automated signal that could rapidly re-fire), so no dedup_key is
-    needed the way alert/SOS notifications require one."""
+    """Notify all other active members that a new member has joined the group."""
     notification_service.notify_group_safely(
-        db, group_id=group.id, type="MEMBER_JOINED", title="Member joined",
-        message="A new member has joined the group.", severity="INFO", exclude_user_id=new_member_id,
+        db,
+        group_id=group.id,
+        type="MEMBER_JOINED",
+        title="Member joined",
+        message="A new member has joined the group.",
+        severity="INFO",
+        exclude_user_id=new_member_id,
     )
 
 
@@ -131,14 +136,14 @@ def get_group(db: Session, group_id: uuid.UUID) -> Optional[Group]:
 
 
 def get_group_members_with_profiles(db: Session, group_id: uuid.UUID):
-    """Retrieve all active members with their profiles."""
+    """Retrieve all active members with their profiles, including arrival status."""
     stmt = (
         select(GroupMember, Profile)
         .outerjoin(Profile, GroupMember.user_id == Profile.id)
         .where(GroupMember.group_id == group_id, GroupMember.status == MemberStatus.ACTIVE)
     )
     results = db.execute(stmt).all()
-    
+
     members_data = []
     for member, profile in results:
         members_data.append({
@@ -148,8 +153,9 @@ def get_group_members_with_profiles(db: Session, group_id: uuid.UUID):
             "role": member.role,
             "status": member.status,
             "joined_at": member.joined_at,
+            "arrival_status": member.arrival_status,
         })
-    return members_data
+    return [GroupMemberResponse(**m) for m in members_data]
 
 
 def list_user_groups(db: Session, user_id: uuid.UUID):
@@ -161,7 +167,7 @@ def list_user_groups(db: Session, user_id: uuid.UUID):
         .order_by(Group.created_at.desc())
     )
     results = db.execute(stmt).all()
-    
+
     groups_data = []
     for group, member in results:
         groups_data.append({
@@ -174,37 +180,45 @@ def list_user_groups(db: Session, user_id: uuid.UUID):
 
 
 def leave_group(db: Session, group_id: uuid.UUID, user_id: uuid.UUID):
-    """Allow a user to leave a group."""
+    """Allow a user to leave a group.
+
+    Leaders cannot leave without transferring leadership first.
+    """
     member = db.scalars(
         select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
     ).first()
-    
+
     if not member or member.status != MemberStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active membership not found.")
-        
+
     if member.role == MemberRole.LEADER:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Leader cannot leave without transferring leadership first.")
-        
+
     member.status = MemberStatus.LEFT
     db.commit()
     notification_service.notify_group_safely(
-        db, group_id=group_id, type="MEMBER_LEFT", title="Member left",
-        message="A member has left the group.", severity="INFO", exclude_user_id=user_id,
+        db,
+        group_id=group_id,
+        type="MEMBER_LEFT",
+        title="Member left",
+        message="A member has left the group.",
+        severity="INFO",
+        exclude_user_id=user_id,
     )
 
 
 def remove_member(db: Session, group_id: uuid.UUID, target_user_id: uuid.UUID, leader_id: uuid.UUID):
-    """Remove a member from a group."""
+    """Remove a member from a group. Only the leader may invoke this."""
     if target_user_id == leader_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Leader cannot remove themselves.")
-        
+
     target_member = db.scalars(
         select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == target_user_id)
     ).first()
-    
+
     if not target_member or target_member.status != MemberStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target active membership not found.")
-        
+
     target_member.status = MemberStatus.REMOVED
     db.commit()
 
@@ -217,21 +231,152 @@ def transfer_leadership(db: Session, group_id: uuid.UUID, current_leader_id: uui
     group = get_group(db, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
-        
+
     current_leader_membership = db.scalars(
         select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == current_leader_id)
     ).first()
-    
+
     new_leader_membership = db.scalars(
         select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == new_leader_id)
     ).first()
-    
+
     if not new_leader_membership or new_leader_membership.status != MemberStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New leader must be an active member of the group.")
-        
+
     # Perform transfer in one transaction
     current_leader_membership.role = MemberRole.MEMBER
     new_leader_membership.role = MemberRole.LEADER
     group.leader_id = new_leader_id
-    
     db.commit()
+
+# ----------------------------------------------------------------------
+# New session‑lifecycle helper functions
+# ----------------------------------------------------------------------
+
+def set_official_destination(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, name: str, latitude: float, longitude: float) -> Group:
+    """Leader updates the official destination (for both journey modes).
+
+    Validates that the group is not completed/archived and that the caller is the leader.
+    """
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify a completed or archived session.")
+    if group.leader_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can set the destination.")
+
+    # Validate coordinates
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid latitude or longitude values.")
+
+    group.destination_name = name
+    group.destination = f"POINT({longitude} {latitude})"
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+def set_meetup_location(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, latitude: float, longitude: float) -> Group:
+    """Leader sets the meetup location (MEETUP_FIRST mode only)."""
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify a completed or archived session.")
+    if group.leader_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can set the meetup location.")
+    if group.journey_mode != JourneyMode.MEETUP_FIRST:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meetup location is only applicable for MEETUP_FIRST journeys.")
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid latitude or longitude values.")
+
+    group.meetup_location = f"POINT({longitude} {latitude})"
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+def update_arrival_status(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, status: ArrivalStatus) -> GroupMember:
+    """Member updates their own arrival status (MEETUP_FIRST mode only)."""
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot update arrival status for a completed or archived session.")
+    if group.journey_mode != JourneyMode.MEETUP_FIRST:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Arrival status is only relevant for MEETUP_FIRST journeys.")
+
+    member = db.scalars(
+        select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+    ).first()
+    if not member or member.status != MemberStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active membership not found.")
+
+    # Only allow self‑updates
+    if member.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another member's arrival status.")
+
+    member.arrival_status = status
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+def transition_session_status(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, new_status: SessionStatus) -> Group:
+    """Leader drives the session lifecycle.
+
+    Enforces the allowed transitions defined in the specification.
+    """
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    if group.leader_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can change session status.")
+    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session is already completed or archived.")
+
+    current = group.session_status
+    # Define allowed transitions
+    allowed = {
+        SessionStatus.CREATED: {SessionStatus.MEETUP, SessionStatus.READY},
+        SessionStatus.MEETUP: {SessionStatus.READY},
+        SessionStatus.READY: {SessionStatus.ACTIVE},
+        SessionStatus.ACTIVE: {SessionStatus.PAUSED, SessionStatus.COMPLETED},
+        SessionStatus.PAUSED: {SessionStatus.ACTIVE, SessionStatus.COMPLETED},
+    }
+    # Verify transition is permitted
+    if new_status not in allowed.get(current, set()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid transition from {current.value} to {new_status.value}.",
+        )
+
+    # Additional validation per transition
+    if current == SessionStatus.CREATED:
+        if new_status == SessionStatus.MEETUP:
+            if group.journey_mode != JourneyMode.MEETUP_FIRST:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MEETUP transition only valid for MEETUP_FIRST journeys.")
+        elif new_status == SessionStatus.READY:
+            if group.journey_mode != JourneyMode.DIRECT_DESTINATION:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="READY transition from CREATED is only allowed for DIRECT_DESTINATION journeys.")
+            if not group.destination:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Destination must be set before moving to READY.")
+    if current == SessionStatus.MEETUP and new_status == SessionStatus.READY:
+        # Leader explicitly confirms readiness; optionally ensure at least one arrival
+        any_arrived = db.scalars(
+            select(GroupMember)
+            .where(
+                GroupMember.group_id == group_id,
+                GroupMember.arrival_status == ArrivalStatus.ARRIVED,
+                GroupMember.status == MemberStatus.ACTIVE,
+            )
+        ).first()
+        if not any_arrived:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one member must have ARRIVED before moving to READY.")
+    # No extra checks for other transitions
+
+    group.session_status = new_status
+    db.commit()
+    db.refresh(group)
+    return group

@@ -88,3 +88,44 @@ class RouteStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+
+
+# New enums for Phase 1
+class JourneyMode(str, enum.Enum):
+    """Mode of rally journey.
+
+    MEETUP_FIRST – members gather at a meetup point before the final destination.
+    DIRECT_DESTINATION – members head straight to the final destination.
+    """
+    MEETUP_FIRST = "MEETUP_FIRST"
+    DIRECT_DESTINATION = "DIRECT_DESTINATION"
+
+class SessionStatus(str, enum.Enum):
+    """Lifecycle of a group‑level rally session.
+
+    CREATED – group exists but session not yet configured.
+    MEETUP – meetup point defined, members can converge.
+    READY – all members ready, leader may start the rally.
+    ACTIVE – rally in progress.
+    PAUSED – temporarily paused.
+    COMPLETED – rally finished.
+    ARCHIVED – historical, read‑only.
+    """
+    CREATED = "CREATED"
+    MEETUP = "MEETUP"
+    READY = "READY"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+
+class ArrivalStatus(str, enum.Enum):
+    """Member's arrival state at the meetup point.
+
+    PENDING – not yet arrived.
+    ARRIVED – reached meetup.
+    DEPARTED – left the meetup after rally start.
+    """
+    PENDING = "PENDING"
+    ARRIVED = "ARRIVED"
+    DEPARTED = "DEPARTED"

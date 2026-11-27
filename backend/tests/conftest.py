@@ -1,15 +1,12 @@
+import pytest
 import time
 from typing import Optional
-
 import fakeredis
 import jwt
-import pytest
-
 from app.core.config import settings
 
 TEST_JWT_SECRET = "test-only-secret-do-not-use-in-production"
 DEFAULT_TEST_USER_ID = "11111111-1111-1111-1111-111111111111"
-
 
 @pytest.fixture
 def fake_redis():
@@ -18,7 +15,6 @@ def fake_redis():
     built in app/core/redis.py, so values round-trip as str, not bytes."""
     client = fakeredis.FakeAsyncRedis(decode_responses=True)
     yield client
-
 
 @pytest.fixture(autouse=True)
 def configured_jwt_secret(monkeypatch):
@@ -35,7 +31,6 @@ def configured_jwt_secret(monkeypatch):
     monkeypatch.setattr(settings, "SUPABASE_URL", None)
     yield
 
-
 @pytest.fixture(autouse=True)
 def configure_test_db():
     """Ensure tests run cleanly without a live database or .env file
@@ -45,7 +40,7 @@ def configure_test_db():
     from unittest.mock import MagicMock
     from app.core.database import get_db
     from app.main import app
-
+    
     prev = app.dependency_overrides.get(get_db)
     if get_db not in app.dependency_overrides:
         app.dependency_overrides[get_db] = lambda: MagicMock()
@@ -56,8 +51,6 @@ def configure_test_db():
             app.dependency_overrides[get_db] = prev
         else:
             app.dependency_overrides.pop(get_db, None)
-
-
 
 def make_token(
     sub: str = DEFAULT_TEST_USER_ID,

@@ -22,6 +22,25 @@ from app.services import group_service
 
 router = APIRouter(tags=["Groups"])
 
+# New schemas for Phase 2 actions
+from pydantic import BaseModel, Field
+from app.models.enums import ArrivalStatus, SessionStatus
+
+class DestinationUpdate(BaseModel):
+    name: str = Field(..., max_length=255)
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+
+class MeetupLocationUpdate(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+
+class ArrivalStatusUpdate(BaseModel):
+    status: ArrivalStatus
+
+class SessionTransitionRequest(BaseModel):
+    new_status: SessionStatus
+
 
 @router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
 def create_group_endpoint(
@@ -81,7 +100,9 @@ def get_group_members_endpoint(
     db: Session = Depends(get_db),
 ):
     """Get all active members of the group. Must be an active member."""
-    return group_service.get_group_members_with_profiles(db, group_id)
+    members = group_service.get_group_members_with_profiles(db, group_id)
+    return [GroupMemberResponse(**m) for m in members]
+
 
 
 @router.post("/{group_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
@@ -105,7 +126,67 @@ def remove_member_endpoint(
     group_service.remove_member(db, group_id, target_user_id, leader.user_id)
 
 
+@router.patch("/{group_id}/destination", response_model=GroupResponse)
+def update_destination_endpoint(
+    group_id: uuid.UUID,
+    update: DestinationUpdate,
+    leader: GroupMember = Depends(require_group_leader),
+    db: Session = Depends(get_db),
+):
+    """Leader updates official destination for the group."""
+    return group_service.set_official_destination(
+        db, group_id, leader.user_id, update.name, update.latitude, update.longitude
+    )
+
+
+@router.patch("/{group_id}/meetup-location", response_model=GroupResponse)
+def update_meetup_location_endpoint(
+    group_id: uuid.UUID,
+    update: MeetupLocationUpdate,
+    leader: GroupMember = Depends(require_group_leader),
+    db: Session = Depends(get_db),
+):
+    """Leader sets meetup location (MEETUP_FIRST mode)."""
+    return group_service.set_meetup_location(
+        db, group_id, leader.user_id, update.latitude, update.longitude
+    )
+
+
+@router.patch("/{group_id}/arrival", response_model=GroupMemberResponse)
+def update_arrival_status_endpoint(
+    group_id: uuid.UUID,
+    update: ArrivalStatusUpdate,
+    member: GroupMember = Depends(require_group_member),
+    db: Session = Depends(get_db),
+):
+    """Member updates their own arrival status."""
+    return group_service.update_arrival_status(
+        db, group_id, member.user_id, update.status
+    )
+
+
+@router.post("/{group_id}/session/transition", response_model=GroupResponse)
+def transition_session_status_endpoint(
+    group_id: uuid.UUID,
+    request: SessionTransitionRequest,
+    leader: GroupMember = Depends(require_group_leader),
+    db: Session = Depends(get_db),
+):
+    """Leader drives session lifecycle transitions."""
+    return group_service.transition_session_status(
+        db, group_id, leader.user_id, request.new_status
+    )
+
+
 @router.post("/{group_id}/transfer-leadership", status_code=status.HTTP_204_NO_CONTENT)
+def transfer_leadership_endpoint(
+    group_id: uuid.UUID,
+    request: TransferLeadershipRequest,
+    leader: GroupMember = Depends(require_group_leader),
+    db: Session = Depends(get_db),
+):
+    """Transfer leadership to another active member. Must be current leader."""
+    group_service.transfer_leadership(db, group_id, leader.user_id, request.new_leader_id)
 def transfer_leadership_endpoint(
     group_id: uuid.UUID,
     request: TransferLeadershipRequest,

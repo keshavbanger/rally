@@ -7,12 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.enums import GroupStatus, MemberRole, MemberStatus
 
 
+from app.models.enums import JourneyMode, SessionStatus, ArrivalStatus
+
+
 class GroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     destination_name: Optional[str] = Field(None, max_length=255)
     # Optional coordinates for the future if needed
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
+    # Journey mode – defaults to DIRECT_DESTINATION for backward compatibility
+    journey_mode: JourneyMode = Field(default=JourneyMode.DIRECT_DESTINATION)
 
 
 class GroupJoin(BaseModel):
@@ -38,7 +43,8 @@ class GroupMemberResponse(BaseModel):
     avatar_url: Optional[str] = None
     role: MemberRole
     status: MemberStatus
-    joined_at: datetime
+    arrival_status: ArrivalStatus = Field(default=ArrivalStatus.PENDING)
+
 
     model_config = ConfigDict(from_attributes=True)
 
