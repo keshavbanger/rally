@@ -40,16 +40,29 @@ def create_group(db: Session, user_id: uuid.UUID, group_data: GroupCreate) -> Gr
     if group_data.latitude is not None and group_data.longitude is not None:
         destination = f"POINT({group_data.longitude} {group_data.latitude})"
 
+    meetup_name = getattr(group_data, "meetup_name", None)
+    meetup_location = None
+    meetup_lat = getattr(group_data, "meetup_latitude", None)
+    meetup_lng = getattr(group_data, "meetup_longitude", None)
+    if meetup_lat is not None and meetup_lng is not None:
+        meetup_location = f"POINT({meetup_lng} {meetup_lat})"
+
     # 3. Create the Group with journey mode and session status defaults
+    initial_session_status = SessionStatus.CREATED
+    if group_data.journey_mode == JourneyMode.MEETUP_FIRST and (meetup_name or meetup_location):
+        initial_session_status = SessionStatus.MEETUP
+
     group = Group(
         name=group_data.name,
         join_code=join_code,
         leader_id=user_id,
         destination_name=group_data.destination_name,
         destination=destination,
+        meetup_name=meetup_name,
+        meetup_location=meetup_location,
         status=GroupStatus.ACTIVE,
         journey_mode=group_data.journey_mode,
-        session_status=SessionStatus.CREATED,
+        session_status=initial_session_status,
     )
     db.add(group)
     db.flush()  # To obtain group.id
@@ -273,11 +286,22 @@ def set_official_destination(db: Session, group_id: uuid.UUID, user_id: uuid.UUI
 
     group.destination_name = name
     group.destination = f"POINT({longitude} {latitude})"
-    # Caller is responsible for committing and refreshing.
+    db.commit()
+    db.refresh(group)
     return group
-    """Leader updates the official destination (for both journey modes).
 
-    Validates that the group is not completed/archived and that the caller is the leader.
+
+def set_meetup_location(
+    db: Session,
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *args,
+    **kwargs,
+) -> Group:
+    """Leader sets the meetup location (MEETUP_FIRST mode only).
+    Supports signatures:
+      (db, group_id, user_id, latitude, longitude)
+      (db, group_id, user_id, meetup_name, latitude, longitude)
     """
     group = db.scalars(select(Group).where(Group.id == group_id)).first()
     if not group:
@@ -285,34 +309,30 @@ def set_official_destination(db: Session, group_id: uuid.UUID, user_id: uuid.UUI
     if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify a completed or archived session.")
     if group.leader_id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can set the destination.")
-
-    # Validate coordinates
-    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid latitude or longitude values.")
-
-    group.destination_name = name
-    group.destination = f"POINT({longitude} {latitude})"
-    db.commit()
-    db.refresh(group)
-    return group
-
-
-def set_meetup_location(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, latitude: float, longitude: float) -> Group:
-    """Leader sets the meetup location (MEETUP_FIRST mode only)."""
-    group = db.scalars(select(Group).where(Group.id == group_id)).first()
-    if not group:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
-    if group.session_status in (SessionStatus.COMPLETED, SessionStatus.ARCHIVED):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot modify a completed or archived session.")
-    if group.leader_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the group leader can set the meetup location.")
-    if group.journey_mode != JourneyMode.MEETUP_FIRST:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meetup location is only applicable for MEETUP_FIRST journeys.")
-    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+    group.journey_mode = JourneyMode.MEETUP_FIRST
+
+    meetup_name = kwargs.get("meetup_name")
+    latitude = kwargs.get("latitude")
+    longitude = kwargs.get("longitude")
+
+    if len(args) == 2:
+        latitude, longitude = args[0], args[1]
+    elif len(args) >= 3:
+        if isinstance(args[0], str):
+            meetup_name, latitude, longitude = args[0], args[1], args[2]
+        else:
+            latitude, longitude, meetup_name = args[0], args[1], args[2]
+
+    if latitude is None or longitude is None or not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid latitude or longitude values.")
 
+    if meetup_name is not None:
+        group.meetup_name = meetup_name
     group.meetup_location = f"POINT({longitude} {latitude})"
+    if group.session_status == SessionStatus.CREATED:
+        group.session_status = SessionStatus.MEETUP
+
     db.commit()
     db.refresh(group)
     return group
@@ -334,14 +354,85 @@ def update_arrival_status(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, 
     if not member or member.status != MemberStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active membership not found.")
 
-    # Only allow self‑updates
-    if member.user_id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify another member's arrival status.")
-
     member.arrival_status = status
     db.commit()
     db.refresh(member)
     return member
+
+
+def update_member_readiness(
+    db: Session,
+    group_id: uuid.UUID,
+    user_id: uuid.UUID,
+    arrival_status: ArrivalStatus,
+) -> GroupMember:
+    """Member updates their own arrival and readiness status for the meetup phase."""
+    member = db.scalars(
+        select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == user_id)
+    ).first()
+    if not member or member.status != MemberStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active membership not found.")
+
+    member.arrival_status = arrival_status
+
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if group and getattr(group, "journey_mode", None) == JourneyMode.MEETUP_FIRST and getattr(group, "session_status", None) == SessionStatus.MEETUP:
+        members = db.scalars(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.status == MemberStatus.ACTIVE,
+            )
+        ).all()
+        if members and all(m.arrival_status in (ArrivalStatus.ARRIVED, ArrivalStatus.READY) for m in members):
+            group.session_status = SessionStatus.READY
+
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+def get_group_readiness(db: Session, group_id: uuid.UUID) -> dict:
+    """Get group meetup readiness statistics."""
+    group = db.scalars(select(Group).where(Group.id == group_id)).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    members = db.scalars(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.status == MemberStatus.ACTIVE,
+        )
+    ).all()
+    total = len(members)
+    ready = sum(1 for m in members if m.arrival_status in (ArrivalStatus.ARRIVED, ArrivalStatus.READY))
+    return {
+        "group_id": group_id,
+        "journey_mode": group.journey_mode,
+        "session_status": group.session_status,
+        "total_members": total,
+        "ready_members": ready,
+        "is_ready_to_start": ready > 0 and (group.journey_mode == JourneyMode.DIRECT_DESTINATION or ready == total),
+    }
+
+
+def validate_rally_start_readiness(db: Session, group: Group) -> None:
+    """Validate that the group is eligible to transition from meetup to active rally."""
+    if group.journey_mode == JourneyMode.MEETUP_FIRST:
+        if not group.meetup_location and not getattr(group, "meetup_name", None):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot start rally in MEETUP_FIRST mode without a configured meetup point.",
+            )
+        members = db.scalars(
+            select(GroupMember).where(
+                GroupMember.group_id == group.id,
+                GroupMember.status == MemberStatus.ACTIVE,
+            )
+        ).all()
+        if not members or not any(m.arrival_status in (ArrivalStatus.ARRIVED, ArrivalStatus.READY) for m in members):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot start rally in MEETUP_FIRST mode: no group members have marked themselves ready.",
+            )
 
 
 def transition_session_status(db: Session, group_id: uuid.UUID, user_id: uuid.UUID, new_status: SessionStatus) -> Group:

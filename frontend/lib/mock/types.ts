@@ -7,6 +7,7 @@ export interface Member {
   isCurrentUser: boolean;
   online: boolean;
   status: SafetyStatus;
+  arrivalStatus?: 'NOT_ARRIVED' | 'ARRIVED' | 'READY';
   lat: number;
   lng: number;
   speedKmh: number;
@@ -60,6 +61,11 @@ export interface Group {
   destination: string;
   destinationLat: number;
   destinationLng: number;
+  journeyMode?: 'MEETUP_FIRST' | 'DIRECT_DESTINATION';
+  sessionStatus?: 'CREATED' | 'MEETUP' | 'READY' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
+  meetupName?: string | null;
+  meetupLat?: number | null;
+  meetupLng?: number | null;
   maxMembers: number;
   joinCode: string;
   createdAt: number;
@@ -77,6 +83,10 @@ export interface CreateGroupInput {
   name: string;
   destination: string;
   maxMembers: number;
+  journeyMode?: 'MEETUP_FIRST' | 'DIRECT_DESTINATION';
+  meetupName?: string;
+  meetupLat?: number;
+  meetupLng?: number;
 }
 
 export interface TripEvent {

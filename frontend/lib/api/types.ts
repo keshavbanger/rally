@@ -31,6 +31,10 @@ export interface MeResponse {
 export type GroupStatus = 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
 export type MemberRole = 'LEADER' | 'MEMBER';
 export type MemberStatus = 'ACTIVE' | 'LEFT' | 'REMOVED';
+export type JourneyMode = 'MEETUP_FIRST' | 'DIRECT_DESTINATION';
+export type SessionStatus = 'CREATED' | 'MEETUP' | 'READY' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
+export type ArrivalStatus = 'NOT_ARRIVED' | 'ARRIVED' | 'READY';
+export type SuggestionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface ApiGroup {
   id: string;
@@ -39,6 +43,22 @@ export interface ApiGroup {
   leader_id: string | null;
   destination_name: string | null;
   status: GroupStatus;
+  journey_mode?: JourneyMode;
+  session_status?: SessionStatus;
+  meetup_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiDestinationSuggestion {
+  id: string;
+  group_id: string;
+  user_id: string;
+  destination_name: string;
+  latitude: number;
+  longitude: number;
+  status: SuggestionStatus;
+  rejection_reason?: string | null;
   created_at: string;
   updated_at: string;
 }

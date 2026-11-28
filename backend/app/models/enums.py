@@ -122,12 +122,17 @@ class SessionStatus(str, enum.Enum):
 class ArrivalStatus(str, enum.Enum):
     """Member's arrival state at the meetup point.
 
-    PENDING – not yet arrived.
+    PENDING / NOT_ARRIVED – not yet arrived.
+    EN_ROUTE – traveling to meetup.
     ARRIVED – reached meetup.
+    READY – arrived and confirmed ready.
     DEPARTED – left the meetup after rally start.
     """
     PENDING = "PENDING"
+    NOT_ARRIVED = "NOT_ARRIVED"
+    EN_ROUTE = "EN_ROUTE"
     ARRIVED = "ARRIVED"
+    READY = "READY"
     DEPARTED = "DEPARTED"
 
 class SuggestionStatus(str, enum.Enum):

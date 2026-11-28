@@ -16,7 +16,9 @@ from app.schemas.group import (
     GroupResponse,
     GroupMemberResponse,
     GroupListItem,
+    SetMeetupRequest,
     TransferLeadershipRequest,
+    UpdateReadinessRequest,
 )
 from app.services import group_service
 
@@ -190,11 +192,38 @@ def transfer_leadership_endpoint(
 ):
     """Transfer leadership to another active member. Must be current leader."""
     group_service.transfer_leadership(db, group_id, leader.user_id, request.new_leader_id)
-def transfer_leadership_endpoint(
+
+
+@router.post("/{group_id}/meetup", response_model=GroupResponse)
+def set_meetup_endpoint(
     group_id: uuid.UUID,
-    request: TransferLeadershipRequest,
+    request: SetMeetupRequest,
     leader: GroupMember = Depends(require_group_leader),
     db: Session = Depends(get_db),
 ):
-    """Transfer leadership to another active member. Must be current leader."""
-    group_service.transfer_leadership(db, group_id, leader.user_id, request.new_leader_id)
+    """Set or update the common meetup location. Must be the group leader."""
+    return group_service.set_meetup_location(
+        db, group_id, leader.user_id, request.meetup_name, request.latitude, request.longitude
+    )
+
+
+@router.post("/{group_id}/readiness", response_model=GroupMemberResponse)
+def update_readiness_endpoint(
+    group_id: uuid.UUID,
+    request: UpdateReadinessRequest,
+    member: GroupMember = Depends(require_group_member),
+    db: Session = Depends(get_db),
+):
+    """Update own arrival and readiness status for the meetup phase."""
+    return group_service.update_member_readiness(db, group_id, member.user_id, request.arrival_status)
+
+
+@router.get("/{group_id}/readiness")
+def get_readiness_endpoint(
+    group_id: uuid.UUID,
+    member: GroupMember = Depends(require_group_member),
+    db: Session = Depends(get_db),
+):
+    """Get group meetup readiness statistics. Must be an active member."""
+    return group_service.get_group_readiness(db, group_id)
+

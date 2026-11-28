@@ -11,15 +11,20 @@ from app.models.enums import (
     AlertSeverity,
     AlertStatus,
     AlertType,
+    ArrivalStatus,
     GroupStatus,
     IntelligenceEventType,
     IntelligenceSeverity,
+    JourneyMode,
     MemberRole,
     MemberStatus,
     RouteStatus,
+    SessionStatus,
     SOSStatus,
+    SuggestionStatus,
     TripStatus,
 )
+from app.models.destination_suggestion import DestinationSuggestion
 from app.models.group import Group
 from app.models.destination_suggestion import DestinationSuggestion
 from app.models.group_member import GroupMember
@@ -47,7 +52,12 @@ __all__ = [
     "TripAnalyticsSnapshot",
     "Notification",
     "UserSetting",
+    "DestinationSuggestion",
     "GroupStatus",
+    "JourneyMode",
+    "SessionStatus",
+    "ArrivalStatus",
+    "SuggestionStatus",
     "MemberRole",
     "MemberStatus",
     "TripStatus",

@@ -344,6 +344,34 @@ export default function OsmLiveMap({
       `);
     }
 
+    // 1b. Common Meetup Marker (visually distinct from destination)
+    const meetupLat = group?.meetupLat ?? 0;
+    const meetupLng = group?.meetupLng ?? 0;
+    const meetupName = group?.meetupName || 'Meetup Point';
+    const hasMeetup = meetupLat !== 0 && meetupLng !== 0;
+
+    if (hasMeetup) {
+      const meetupIcon = L.divIcon({
+        className: 'rally-meetup-marker',
+        html: `
+          <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
+            <div style="position:absolute;width:100%;height:100%;border-radius:50%;background:#F59E0B;opacity:0.3;animation:pulse 2s infinite;"></div>
+            <div style="width:24px;height:24px;border-radius:50%;background:#F59E0B;border:2px solid #ffffff;box-shadow:0 0 14px rgba(245,158,11,0.9);display:flex;align-items:center;justify-content:center;color:#000;font-size:11px;font-weight:900;">🚩</div>
+          </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+
+      const meetupMarker = L.marker([meetupLat, meetupLng], { icon: meetupIcon }).addTo(markersLayerRef.current);
+      meetupMarker.bindPopup(`
+        <div style="background:${popupBg};color:${popupText};padding:6px 10px;border-radius:8px;font-family:sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.12);border:1px solid ${popupBorder};">
+          <div style="font-weight:700;font-size:12px;color:#F59E0B;">🚩 ${meetupName}</div>
+          <div style="font-size:11px;color:${popupSub};">Common Meetup Point</div>
+        </div>
+      `);
+    }
+
     // 2. Start Marker
     if (showStart && effectiveRouteAlts[0]?.coordinates?.[0]) {
       const startPt = effectiveRouteAlts[0].coordinates[0];
@@ -447,7 +475,7 @@ export default function OsmLiveMap({
         </div>
       `);
     });
-  }, [L, effectiveMembers, group?.members, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts, isLight]);
+  }, [L, effectiveMembers, group?.members, group?.meetupLat, group?.meetupLng, group?.meetupName, deviceLoc, hasDestination, destLat, destLng, destName, showStart, effectiveRouteAlts, alerts, isLight]);
 
   // ── Auto-fit group on initial load ────────────────────────────────────────
   const initialFitDoneRef = useRef(false);

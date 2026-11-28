@@ -16,6 +16,8 @@ export default function CreateGroupPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
+  const [journeyMode, setJourneyMode] = useState<'DIRECT_DESTINATION' | 'MEETUP_FIRST'>('DIRECT_DESTINATION');
+  const [meetupName, setMeetupName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [maxMembers, setMaxMembers] = useState(5);
   const [submitting, setSubmitting] = useState(false);
@@ -46,6 +48,20 @@ export default function CreateGroupPage() {
       // optional
     }
 
+    let mLat: number | undefined;
+    let mLng: number | undefined;
+    if (journeyMode === 'MEETUP_FIRST' && meetupName.trim()) {
+      try {
+        const mPlaces = await searchDestination(meetupName.trim());
+        if (mPlaces.length > 0) {
+          mLat = mPlaces[0].latitude;
+          mLng = mPlaces[0].longitude;
+        }
+      } catch {
+        // optional
+      }
+    }
+
     try {
       const group = await rallyGroupService.createGroup({
         name: name.trim(),
@@ -53,6 +69,10 @@ export default function CreateGroupPage() {
         maxMembers,
         destinationLat: lat,
         destinationLng: lng,
+        journeyMode,
+        meetupName: journeyMode === 'MEETUP_FIRST' ? meetupName.trim() : undefined,
+        meetupLat: mLat,
+        meetupLng: mLng,
       } as any);
 
       setJoinCode(group.joinCode);
@@ -157,6 +177,50 @@ export default function CreateGroupPage() {
                   </div>
                 )}
               </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground">Journey Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setJourneyMode('DIRECT_DESTINATION')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      journeyMode === 'DIRECT_DESTINATION'
+                        ? 'border-rally-blue bg-rally-blue/10 text-foreground'
+                        : 'border-border bg-card text-muted-foreground hover:bg-white/5'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">Direct Destination</div>
+                    <div className="text-[10px] mt-0.5 opacity-80">Navigate straight to rally endpoint</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJourneyMode('MEETUP_FIRST')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      journeyMode === 'MEETUP_FIRST'
+                        ? 'border-rally-blue bg-rally-blue/10 text-foreground'
+                        : 'border-border bg-card text-muted-foreground hover:bg-white/5'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">Meetup Point First</div>
+                    <div className="text-[10px] mt-0.5 opacity-80">Gather & verify readiness before start</div>
+                  </button>
+                </div>
+              </div>
+
+              {journeyMode === 'MEETUP_FIRST' && (
+                <div className="space-y-1.5 animate-in fade-in duration-200">
+                  <label className="text-xs font-semibold text-muted-foreground">Meetup Location Point</label>
+                  <input
+                    type="text"
+                    value={meetupName}
+                    onChange={(e) => setMeetupName(e.target.value)}
+                    placeholder="e.g. Shell Petrol Pump, Highway Exit 4"
+                    required={journeyMode === 'MEETUP_FIRST'}
+                    className="w-full bg-card border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-rally-blue transition-colors"
+                  />
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Maximum Members</label>

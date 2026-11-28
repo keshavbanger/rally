@@ -178,6 +178,39 @@ export interface ServerRouteSelectedMessage {
   data?: any;
 }
 
+export interface ServerDestinationUpdatedMessage {
+  type: 'destination_updated';
+  data: {
+    group_id: string;
+    destination_name: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    updated_at: string;
+  };
+}
+
+export interface ServerMeetupUpdatedMessage {
+  type: 'meetup_updated';
+  data: {
+    group_id: string;
+    meetup_name: string;
+    latitude: number;
+    longitude: number;
+    updated_at: string;
+  };
+}
+
+export interface ServerReadinessUpdatedMessage {
+  type: 'readiness_updated';
+  data: {
+    group_id: string;
+    user_id: string;
+    arrival_status: string;
+    all_ready: boolean;
+    updated_at: string;
+  };
+}
+
 export type ServerMessage =
   | ServerTripStateMessage
   | ServerLocationUpdateMessage
@@ -194,6 +227,9 @@ export type ServerMessage =
   | ServerRouteProgressMessage
   | ServerRouteDeviationMessage
   | ServerRouteSelectedMessage
+  | ServerDestinationUpdatedMessage
+  | ServerMeetupUpdatedMessage
+  | ServerReadinessUpdatedMessage
   | ServerErrorMessage;
 
 export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING' | 'ERROR';

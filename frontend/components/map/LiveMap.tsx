@@ -226,6 +226,11 @@ function MapContent({
   const destName = customDestination ? customDestination.name : (group?.destination ?? 'Destination');
   const hasDestination = destLat !== 0 || destLng !== 0;
 
+  const meetupLat = group?.meetupLat ?? 0;
+  const meetupLng = group?.meetupLng ?? 0;
+  const meetupName = group?.meetupName || 'Meetup Point';
+  const hasMeetup = meetupLat !== 0 && meetupLng !== 0;
+
   // Centre: prefer device location, then group members, then destination
   const center: google.maps.LatLngLiteral = useMemo(() =>
     deviceLoc ??
@@ -407,6 +412,29 @@ function MapContent({
             <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: destLat, lng: destLng }}>
               <div style={{ color: '#000', fontSize: 12, fontWeight: 600 }}>{destName}</div>
               <div style={{ color: '#888', fontSize: 11 }}>Destination</div>
+            </InfoWindow>
+          )}
+        </AdvancedMarker>
+      )}
+
+      {/* ── Meetup Point Marker (visually distinct from destination) ── */}
+      {hasMeetup && (
+        <AdvancedMarker
+          position={{ lat: meetupLat, lng: meetupLng }}
+          onClick={() => setActivePopup('meetup')}
+        >
+          <div className="relative flex items-center justify-center cursor-pointer group">
+            <div className="w-8 h-8 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.6)]">
+              <span className="text-xs">🚩</span>
+            </div>
+            <div className="absolute -bottom-6 bg-black/90 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-500/40 whitespace-nowrap shadow-md">
+              {meetupName}
+            </div>
+          </div>
+          {activePopup === 'meetup' && (
+            <InfoWindow onClose={() => setActivePopup(null)} position={{ lat: meetupLat, lng: meetupLng }}>
+              <div style={{ color: '#000', fontSize: 12, fontWeight: 700 }}>🚩 {meetupName}</div>
+              <div style={{ color: '#D97706', fontSize: 11, fontWeight: 600 }}>Common Meetup Point</div>
             </InfoWindow>
           )}
         </AdvancedMarker>

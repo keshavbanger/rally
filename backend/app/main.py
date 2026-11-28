@@ -91,6 +91,9 @@ app.include_router(auth_router, prefix=settings.API_V1_STR)
 from app.api.groups import router as groups_router
 app.include_router(groups_router, prefix=f"{settings.API_V1_STR}/groups")
 
+from app.api.destination_suggestions import router as destination_suggestions_router
+app.include_router(destination_suggestions_router, prefix=f"{settings.API_V1_STR}/groups")
+
 from app.api.trips import router as trips_router
 app.include_router(trips_router, prefix=settings.API_V1_STR)
 

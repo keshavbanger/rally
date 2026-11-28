@@ -10,6 +10,8 @@ import {
 import Topbar from '@/components/dashboard/Topbar';
 import RequireGroup from '@/components/dashboard/RequireGroup';
 import LiveMap from '@/components/map/LiveMap';
+import DestinationSuggestions from '@/components/dashboard/DestinationSuggestions';
+import MeetupReadinessCard from '@/components/dashboard/MeetupReadinessCard';
 import { searchDestination, Destination } from '@/lib/services/geocoding';
 import { calculateRoute, RouteOption } from '@/lib/services/routing';
 import { groupService } from '@/lib/group/groupService';
@@ -410,6 +412,29 @@ export default function RoutePage() {
                       <p className="opacity-90">{routeError}</p>
                     </div>
                   </div>
+                )}
+
+                {/* ── Meetup Readiness Coordination (MEETUP_FIRST mode) ─────────── */}
+                {group?.id && group.journeyMode === 'MEETUP_FIRST' && (
+                  <MeetupReadinessCard
+                    groupId={group.id}
+                    isLeader={isLeader}
+                    meetupName={group.meetupName}
+                  />
+                )}
+
+                {/* ── Destination Suggestion System ───────────────────────────── */}
+                {group?.id && (
+                  <DestinationSuggestions
+                    groupId={group.id}
+                    isLeader={isLeader}
+                    onDestinationApproved={(newDest, lat, lng) => {
+                      if (lat && lng) {
+                        setDestination({ name: newDest, latitude: lat, longitude: lng });
+                      }
+                      setDestQuery(newDest);
+                    }}
+                  />
                 )}
 
                 {/* ── Stop list ──────────────────────────────────────────────── */}

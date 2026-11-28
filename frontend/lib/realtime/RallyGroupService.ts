@@ -119,6 +119,10 @@ class RallyGroupService implements GroupService {
       destination_name: input.destination,
       latitude: typeof lat === 'number' && Number.isFinite(lat) ? lat : undefined,
       longitude: typeof lng === 'number' && Number.isFinite(lng) ? lng : undefined,
+      journey_mode: input.journeyMode,
+      meetup_name: input.meetupName,
+      meetup_latitude: input.meetupLat,
+      meetup_longitude: input.meetupLng,
     });
     const trip = await tripsApi.createTrip(apiGroup.id, { destination_name: input.destination });
     await this.attachToTrip(apiGroup, trip);
@@ -399,6 +403,44 @@ class RallyGroupService implements GroupService {
         console.warn('Route planning must be completed before trip activation; trip is currently', this.apiTrip.status);
       }
     }
+  }
+
+  async setMeetupLocation(meetupName: string, lat: number, lng: number): Promise<void> {
+    if (!this.apiGroup) return;
+    const updated = await groupsApi.setMeetupLocation(this.apiGroup.id, {
+      meetup_name: meetupName,
+      latitude: lat,
+      longitude: lng,
+    });
+    this.apiGroup = updated;
+    await this.refresh(true);
+  }
+
+  async updateReadiness(arrivalStatus: 'NOT_ARRIVED' | 'ARRIVED' | 'READY'): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.updateReadiness(this.apiGroup.id, arrivalStatus);
+    await this.refresh(true);
+  }
+
+  async suggestDestination(destinationName: string, lat: number, lng: number): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.suggestDestination(this.apiGroup.id, {
+      destination_name: destinationName,
+      latitude: lat,
+      longitude: lng,
+    });
+  }
+
+  async approveDestinationSuggestion(suggestionId: string): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.approveSuggestion(this.apiGroup.id, suggestionId);
+    await this.refresh(true);
+  }
+
+  async rejectDestinationSuggestion(suggestionId: string, reason: string): Promise<void> {
+    if (!this.apiGroup) return;
+    await groupsApi.rejectSuggestion(this.apiGroup.id, suggestionId, reason);
+    await this.refresh(true);
   }
 
   updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null, accuracy?: number | null): void {
@@ -838,6 +880,21 @@ class RallyGroupService implements GroupService {
         void this.loadRouteGeometry();
         void this.refresh(true);
         break;
+      case 'destination_updated':
+        if (this.group && message.data.destination_name) {
+          this.group.destination = message.data.destination_name;
+          if (message.data.latitude && message.data.longitude) {
+            this.group.destinationLat = message.data.latitude;
+            this.group.destinationLng = message.data.longitude;
+          }
+          this.emit();
+        }
+        void this.refresh(true);
+        break;
+      case 'meetup_updated':
+      case 'readiness_updated':
+        void this.refresh(true);
+        break;
       case 'trip_ended':
         void this.refresh(true);
         break;
@@ -922,6 +979,7 @@ class RallyGroupService implements GroupService {
         isCurrentUser: m.user_id === this.currentUserId,
         online,
         status,
+        arrivalStatus: (m as any).arrival_status ?? 'NOT_ARRIVED',
         lat: live?.latitude ?? 0,
         lng: live?.longitude ?? 0,
         speedKmh: live?.speed != null ? Math.round(live.speed * 3.6) : 0,
@@ -957,6 +1015,9 @@ class RallyGroupService implements GroupService {
       destination: this.apiGroup?.destination_name ?? this.apiTrip?.destination_name ?? this.group?.destination ?? 'Destination',
       destinationLat: this.group?.destinationLat ?? 0,
       destinationLng: this.group?.destinationLng ?? 0,
+      journeyMode: (this.apiGroup?.journey_mode as any) ?? this.group?.journeyMode ?? 'DIRECT_DESTINATION',
+      sessionStatus: (this.apiGroup?.session_status as any) ?? this.group?.sessionStatus ?? 'CREATED',
+      meetupName: this.apiGroup?.meetup_name ?? this.group?.meetupName ?? null,
       maxMembers: Math.max(members.length, 5),
       joinCode: this.apiGroup?.join_code ?? this.group?.joinCode ?? '',
       createdAt: this.apiGroup ? new Date(this.apiGroup.created_at).getTime() : (this.group?.createdAt ?? Date.now()),

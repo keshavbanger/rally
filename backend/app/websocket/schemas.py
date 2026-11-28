@@ -337,3 +337,57 @@ def build_route_progress(
             "server_time": datetime.now(timezone.utc).isoformat(),
         },
     }
+
+
+def build_destination_updated(
+    group_id: Any,
+    destination_name: str,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> Dict[str, Any]:
+    return {
+        "type": "destination_updated",
+        "data": {
+            "group_id": str(group_id),
+            "destination_name": destination_name,
+            "latitude": latitude,
+            "longitude": longitude,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
+def build_meetup_updated(
+    group_id: Any,
+    meetup_name: str,
+    latitude: float,
+    longitude: float,
+) -> Dict[str, Any]:
+    return {
+        "type": "meetup_updated",
+        "data": {
+            "group_id": str(group_id),
+            "meetup_name": meetup_name,
+            "latitude": latitude,
+            "longitude": longitude,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
+def build_readiness_updated(
+    group_id: Any,
+    user_id: Any,
+    arrival_status: str,
+    all_ready: bool,
+) -> Dict[str, Any]:
+    return {
+        "type": "readiness_updated",
+        "data": {
+            "group_id": str(group_id),
+            "user_id": str(user_id),
+            "arrival_status": arrival_status,
+            "all_ready": all_ready,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }

@@ -24,6 +24,11 @@ export interface GroupService {
   endTrip(): Promise<TripSummary>;
   setTripRoute(destination: string, destLat: number, destLng: number, route: {lat: number, lng: number}[], distanceMeters: number, durationSeconds: number): void | Promise<void>;
   startTrip(): void | Promise<void>;
+  setMeetupLocation?(meetupName: string, lat: number, lng: number): Promise<void>;
+  updateReadiness?(arrivalStatus: 'NOT_ARRIVED' | 'ARRIVED' | 'READY'): Promise<void>;
+  suggestDestination?(destinationName: string, lat: number, lng: number): Promise<void>;
+  approveDestinationSuggestion?(suggestionId: string): Promise<void>;
+  rejectDestinationSuggestion?(suggestionId: string, reason: string): Promise<void>;
   subscribe(listener: (group: Group | null) => void): () => void;
   updateMyPosition(lat: number, lng: number, speed: number | null, heading: number | null, accuracy?: number | null): void;
 }

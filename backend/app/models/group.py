@@ -24,6 +24,18 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     destination_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     destination = mapped_column(Geography(geometry_type="POINT", srid=4326), nullable=True)
+    meetup_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    meetup_location = mapped_column(Geography(geometry_type="POINT", srid=4326), nullable=True)
+    journey_mode: Mapped[JourneyMode] = mapped_column(
+        SQLEnum(JourneyMode, name="journey_mode", native_enum=False),
+        default=JourneyMode.DIRECT_DESTINATION,
+        nullable=False,
+    )
+    session_status: Mapped[SessionStatus] = mapped_column(
+        SQLEnum(SessionStatus, name="session_status", native_enum=False),
+        default=SessionStatus.CREATED,
+        nullable=False,
+    )
     status: Mapped[GroupStatus] = mapped_column(
         SQLEnum(GroupStatus, name="group_status"), default=GroupStatus.ACTIVE, nullable=False
     )
@@ -32,6 +44,7 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     journey_mode: Mapped[JourneyMode] = mapped_column(
         SQLEnum(JourneyMode, name="journeymode"), nullable=False, default=JourneyMode.DIRECT_DESTINATION
     )
+    meetup_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     meetup_location = mapped_column(Geography(geometry_type="POINT", srid=4326), nullable=True)
     session_status: Mapped[Optional[SessionStatus]] = mapped_column(
         SQLEnum(SessionStatus, name="sessionstatus"), nullable=True, server_default=sa.text("'CREATED'")
@@ -42,10 +55,14 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     members: Mapped[list["GroupMember"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
+    destination_suggestions: Mapped[list["DestinationSuggestion"]] = relationship(  # noqa: F821
+        back_populates="group", cascade="all, delete-orphan"
+    )
     # Deliberately NOT cascade="delete" — see Trip.group_id for why a group must not silently destroy trip history.
     trips: Mapped[list["Trip"]] = relationship(back_populates="group")  # noqa: F821
     suggestions: Mapped[list["DestinationSuggestion"]] = relationship(
         "DestinationSuggestion",
         back_populates="group",
         cascade="all, delete-orphan",
+        overlaps="destination_suggestions",
     )
